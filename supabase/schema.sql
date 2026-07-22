@@ -20,9 +20,20 @@ values (
     'application/pdf',
     'application/vnd.ms-powerpoint',
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.hancom.hwp',
+    'application/vnd.hancom.hwpx',
+    'text/plain',
+    'text/markdown',
+    'text/csv',
+    'application/zip',
     'image/png',
     'image/jpeg',
-    'image/webp'
+    'image/webp',
+    'image/gif'
   ]
 )
 on conflict (id) do update set

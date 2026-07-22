@@ -75,10 +75,21 @@ const materialMimeTypes = {
   '.pdf': 'application/pdf',
   '.ppt': 'application/vnd.ms-powerpoint',
   '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xls': 'application/vnd.ms-excel',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.hwp': 'application/vnd.hancom.hwp',
+  '.hwpx': 'application/vnd.hancom.hwpx',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.csv': 'text/csv',
+  '.zip': 'application/zip',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
-  '.webp': 'image/webp'
+  '.webp': 'image/webp',
+  '.gif': 'image/gif'
 };
 const allowedMaterialExtensions = new Set(Object.keys(materialMimeTypes));
 const MAX_MATERIAL_SIZE = 10 * 1024 * 1024;
@@ -424,7 +435,9 @@ function cookies(req) {
 }
 
 function currentUser(req) {
-  const token = cookies(req).session;
+  const authorization = String(req.headers.authorization || '');
+  const bearerToken = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
+  const token = bearerToken || cookies(req).session;
   return sessionUser(token);
 }
 
@@ -444,6 +457,10 @@ function requireUser(req, res, role) {
     return null;
   }
   return user;
+}
+
+function canManageTeam(user, teamId) {
+  return Boolean(user && (user.role === 'operator' || (user.role === 'participant' && user.teamId === teamId)));
 }
 
 function cleanText(value, max = 500) {
@@ -478,13 +495,14 @@ function isPresentationPublished(teamId) {
 function teamPayload(team, user, includeResults = false) {
   const storedPresentation = db.presentations.find((item) => item.teamId === team.id) || null;
   const published = Boolean(storedPresentation && storedPresentation.published !== false);
-  const presentation = user?.role === 'operator' || published ? storedPresentation : null;
+  const managesTeam = canManageTeam(user, team.id);
+  const presentation = managesTeam || published ? storedPresentation : null;
   const myVote = user ? db.votes.find((item) => item.teamId === team.id && item.userId === user.id) : null;
   const votes = db.votes.filter((item) => item.teamId === team.id);
   const storedMaterials = db.materials
     .filter((item) => item.teamId === team.id)
     .map(({ id, originalName, mimeType, size, createdAt }) => ({ id, originalName, mimeType, size, createdAt }));
-  const materials = user?.role === 'operator' || published ? storedMaterials : [];
+  const materials = managesTeam || published ? storedMaterials : [];
   const payload = {
     id: team.id,
     name: team.name,
@@ -603,7 +621,7 @@ async function handleApi(req, res, pathname) {
       return error(res, 401, '이메일 또는 비밀번호가 올바르지 않습니다.');
     }
     const token = createSessionToken(user);
-    return json(res, 200, { user: publicUser(user) }, {
+    return json(res, 200, { user: publicUser(user), token }, {
       'Set-Cookie': sessionCookie(req, token)
     });
   }
@@ -644,8 +662,9 @@ async function handleApi(req, res, pathname) {
     if (newPassword.length < 12) return error(res, 400, '새 비밀번호는 12자 이상이어야 합니다.');
     user.passwordHash = passwordHash(newPassword);
     await saveDatabase();
-    return json(res, 200, { message: '비밀번호를 변경했습니다.' }, {
-      'Set-Cookie': sessionCookie(req, createSessionToken(user))
+    const token = createSessionToken(user);
+    return json(res, 200, { message: '비밀번호를 변경했습니다.', token }, {
+      'Set-Cookie': sessionCookie(req, token)
     });
   }
 
@@ -679,6 +698,7 @@ async function handleApi(req, res, pathname) {
         published: teams.filter((team) => team.published).length,
         total: db.teams.filter((team) => !team.evaluatorOnly).length,
         evaluatorTeams: db.teams.filter((team) => team.evaluatorOnly).length,
+        evaluatorParticipants: db.users.filter((item) => item.role === 'participant' && db.teams.find((team) => team.id === item.teamId)?.evaluatorOnly).length,
         myVotes: user.role === 'participant' && activeTeamPayload?.myVote ? 1 : 0,
         eligible: user.role === 'participant' && activeTeamPayload && !activeTeamPayload.isOwnTeam ? 1 : 0,
         participants: db.users.filter((item) => item.role === 'participant').length
@@ -790,11 +810,12 @@ async function handleApi(req, res, pathname) {
 
   const presentationMatch = pathname.match(/^\/api\/teams\/([^/]+)\/presentation$/);
   if (req.method === 'POST' && presentationMatch) {
-    const user = requireUser(req, res, 'operator');
+    const user = requireUser(req, res);
     if (!user) return;
     const teamId = presentationMatch[1];
     const team = db.teams.find((item) => item.id === teamId);
     if (!team) return error(res, 404, '팀을 찾을 수 없습니다.');
+    if (!canManageTeam(user, teamId)) return error(res, 403, '관리자 또는 해당 팀 소속만 발표를 수정할 수 있습니다.');
     if (team.evaluatorOnly) return error(res, 400, '평가 전용 팀에는 발표를 등록할 수 없습니다.');
     const body = await readBody(req);
     const title = cleanText(body.title, 80);
@@ -815,10 +836,11 @@ async function handleApi(req, res, pathname) {
 
   const presentationUnpublishMatch = pathname.match(/^\/api\/teams\/([^/]+)\/presentation\/unpublish$/);
   if (req.method === 'POST' && presentationUnpublishMatch) {
-    const user = requireUser(req, res, 'operator');
+    const user = requireUser(req, res);
     if (!user) return;
     const team = db.teams.find((item) => item.id === presentationUnpublishMatch[1]);
     if (!team) return error(res, 404, '팀을 찾을 수 없습니다.');
+    if (!canManageTeam(user, team.id)) return error(res, 403, '관리자 또는 해당 팀 소속만 발표를 초기화할 수 있습니다.');
     const presentationIndex = db.presentations.findIndex((item) => item.teamId === team.id && item.published !== false);
     if (presentationIndex < 0) return error(res, 400, '이미 발표 공개 전 상태입니다.');
     db.presentations.splice(presentationIndex, 1);
@@ -833,17 +855,18 @@ async function handleApi(req, res, pathname) {
 
   const materialUploadMatch = pathname.match(/^\/api\/teams\/([^/]+)\/materials$/);
   if (req.method === 'POST' && materialUploadMatch) {
-    const user = requireUser(req, res, 'operator');
+    const user = requireUser(req, res);
     if (!user) return;
     const teamId = materialUploadMatch[1];
     const team = db.teams.find((item) => item.id === teamId);
     if (!team) return error(res, 404, '팀을 찾을 수 없습니다.');
+    if (!canManageTeam(user, teamId)) return error(res, 403, '관리자 또는 해당 팀 소속만 발표자료를 등록할 수 있습니다.');
     if (team.evaluatorOnly) return error(res, 400, '평가 전용 팀에는 발표자료를 등록할 수 없습니다.');
     if (db.materials.filter((item) => item.teamId === teamId).length >= 5) return error(res, 400, '한 팀에는 발표자료를 최대 5개까지 등록할 수 있습니다.');
     const body = await readBody(req, 15 * 1024 * 1024);
     const originalName = path.basename(cleanText(body.fileName, 150));
     const extension = path.extname(originalName).toLowerCase();
-    if (!originalName || !allowedMaterialExtensions.has(extension)) return error(res, 400, 'PDF, PPT, PPTX 또는 이미지 파일만 등록할 수 있습니다.');
+    if (!originalName || !allowedMaterialExtensions.has(extension)) return error(res, 400, '지원하지 않는 파일 형식입니다. 문서, 한글, 스프레드시트, 이미지 또는 ZIP 파일을 등록해 주세요.');
     const encoded = String(body.data || '').replace(/^data:[^;]+;base64,/, '');
     if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) return error(res, 400, '파일 데이터가 올바르지 않습니다.');
     const fileBuffer = Buffer.from(encoded, 'base64');
@@ -876,7 +899,7 @@ async function handleApi(req, res, pathname) {
     if (!user) return;
     const material = db.materials.find((item) => item.id === materialDownloadMatch[1]);
     if (!material) return error(res, 404, '발표자료를 찾을 수 없습니다.');
-    if (user.role === 'participant' && !isPresentationPublished(material.teamId)) {
+    if (user.role === 'participant' && user.teamId !== material.teamId && !isPresentationPublished(material.teamId)) {
       return error(res, 403, '아직 공개되지 않은 발표자료입니다.');
     }
     try {
@@ -896,10 +919,11 @@ async function handleApi(req, res, pathname) {
 
   const materialDeleteMatch = pathname.match(/^\/api\/materials\/([^/]+)$/);
   if (req.method === 'DELETE' && materialDeleteMatch) {
-    const user = requireUser(req, res, 'operator');
+    const user = requireUser(req, res);
     if (!user) return;
     const index = db.materials.findIndex((item) => item.id === materialDeleteMatch[1]);
     if (index < 0) return error(res, 404, '발표자료를 찾을 수 없습니다.');
+    if (!canManageTeam(user, db.materials[index].teamId)) return error(res, 403, '관리자 또는 해당 팀 소속만 발표자료를 삭제할 수 있습니다.');
     const [material] = db.materials.splice(index, 1);
     await saveDatabase();
     await deleteStoredFiles([material.storedName]);

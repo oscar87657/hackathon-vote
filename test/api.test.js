@@ -39,6 +39,7 @@ async function request(pathname, options = {}, cookie = '') {
 async function login(email, password) {
   const result = await request('/api/login', { method: 'POST', body: JSON.stringify({ email, password }) });
   assert.equal(result.response.status, 200);
+  assert.match(result.body.token, /^[^.]+\.[^.]+$/);
   return result.cookie;
 }
 
@@ -224,6 +225,23 @@ test('운영자 팀 추가와 발표자료 업로드·다운로드', async () =>
   download = await fetch(`${baseUrl}/api/materials/${materialId}/download`, { headers: { Cookie: participantCookie } });
   assert.equal(download.status, 403);
 
+  result = await request('/api/register', {
+    method: 'POST',
+    body: JSON.stringify({ name: '로켓팀원', email: 'rocket@example.com', password: 'password123', teamCode: 'ROCKET26' })
+  });
+  assert.equal(result.response.status, 201);
+  const rocketCookie = await login('rocket@example.com', 'password123');
+  result = await request('/api/dashboard', {}, rocketCookie);
+  const ownUnpublishedTeam = result.body.teams.find((team) => team.id === teamId);
+  assert.equal(ownUnpublishedTeam.isOwnTeam, true);
+  assert.equal(ownUnpublishedTeam.materials[0].originalName, 'rocket-demo.pdf');
+
+  result = await request(`/api/teams/${teamId}/presentation`, {
+    method: 'POST',
+    body: JSON.stringify({ title: '권한 없음', summary: '다른 팀 소속은 이 발표를 수정할 수 없습니다.' })
+  }, participantCookie);
+  assert.equal(result.response.status, 403);
+
   result = await request(`/api/teams/${teamId}/presentation`, {
     method: 'POST',
     body: JSON.stringify({
@@ -231,7 +249,24 @@ test('운영자 팀 추가와 발표자료 업로드·다운로드', async () =>
       summary: '더 빠른 발표 준비를 돕는 협업 프로젝트입니다.',
       details: '발표자의 리허설을 분석하고 핵심 개선점을 제안합니다.'
     })
-  }, operatorCookie);
+  }, rocketCookie);
+  assert.equal(result.response.status, 200);
+
+  const hwpxContent = 'HWPX demo material';
+  result = await request(`/api/teams/${teamId}/materials`, {
+    method: 'POST',
+    body: JSON.stringify({
+      fileName: 'rocket-guide.hwpx',
+      mimeType: 'application/vnd.hancom.hwpx',
+      data: `data:application/vnd.hancom.hwpx;base64,${Buffer.from(hwpxContent).toString('base64')}`
+    })
+  }, rocketCookie);
+  assert.equal(result.response.status, 201);
+  const hwpxMaterialId = result.body.material.id;
+  download = await fetch(`${baseUrl}/api/materials/${hwpxMaterialId}/download`, { headers: { Cookie: rocketCookie } });
+  assert.equal(download.status, 200);
+  assert.equal(await download.text(), hwpxContent);
+  result = await request(`/api/materials/${hwpxMaterialId}`, { method: 'DELETE' }, rocketCookie);
   assert.equal(result.response.status, 200);
   result = await request('/api/dashboard', {}, participantCookie);
   const publishedTeam = result.body.teams.find((team) => team.id === teamId);
@@ -243,7 +278,7 @@ test('운영자 팀 추가와 발표자료 업로드·다운로드', async () =>
   assert.equal(inline.status, 200);
   assert.match(inline.headers.get('content-disposition'), /^inline;/);
 
-  result = await request(`/api/teams/${teamId}/presentation/unpublish`, { method: 'POST' }, operatorCookie);
+  result = await request(`/api/teams/${teamId}/presentation/unpublish`, { method: 'POST' }, rocketCookie);
   assert.equal(result.response.status, 200);
   result = await request('/api/dashboard', {}, participantCookie);
   const unpublishedTeam = result.body.teams.find((team) => team.id === teamId);
@@ -293,6 +328,7 @@ test('평가 전용 그룹은 발표에서 제외되고 모든 발표를 평가�
 
   result = await request('/api/dashboard', {}, operatorCookie);
   assert.equal(result.body.stats.evaluatorTeams, 1);
+  assert.equal(result.body.stats.evaluatorParticipants, 1);
   assert.equal(result.body.stats.total, 4);
   assert.equal(result.body.teams.find((team) => team.id === evaluatorTeamId).memberCount, 1);
 
@@ -301,6 +337,28 @@ test('평가 전용 그룹은 발표에서 제외되고 모든 발표를 평가�
   await workbook.xlsx.load(Buffer.from(await excelResponse.arrayBuffer()));
   const summaryValues = JSON.stringify(workbook.getWorksheet('종합 결과').getSheetValues());
   assert.doesNotMatch(summaryValues, /Teacher Judges/);
+});
+
+test('같은 브라우저 쿠키에서도 탭별 토큰으로 관리자와 참가자 로그인을 유지한다', async () => {
+  const adminLogin = await request('/api/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'admin@hackathon.kr', password: 'admin1234' })
+  });
+  const participantLogin = await request('/api/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'teacher@example.com', password: 'password123' })
+  });
+
+  let result = await request('/api/dashboard', {
+    headers: { Authorization: `Bearer ${adminLogin.body.token}` }
+  }, participantLogin.cookie);
+  assert.equal(result.body.user.role, 'operator');
+
+  result = await request('/api/dashboard', {
+    headers: { Authorization: `Bearer ${participantLogin.body.token}` }
+  }, participantLogin.cookie);
+  assert.equal(result.body.user.role, 'participant');
+  assert.equal(result.body.user.name, '평가선생님');
 });
 
 test('팀별·전체 참가자 투표 초기화와 권한 검사', async () => {

@@ -1,5 +1,6 @@
 const app = document.querySelector('#app');
 const toastRoot = document.querySelector('#toast-root');
+const SESSION_KEY = 'hackathon-stage-session';
 
 const state = {
   user: null,
@@ -42,9 +43,14 @@ function icon(name) {
 }
 
 async function api(url, options = {}) {
+  const token = window.sessionStorage.getItem(SESSION_KEY);
   const response = await fetch(url, {
     ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    }
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || '요청을 처리하지 못했습니다.');
@@ -234,8 +240,9 @@ function participantTeamCard(team) {
   return `<article class="team-card ${locked ? 'locked' : ''} ${team.isActive ? 'active-team' : ''}" style="--team-color:${team.color}">
     <div class="team-meta"><span class="team-number">TEAM / ${String(team.order).padStart(2, '0')}</span><span class="mini-state ${stateClass}">${stateLabel}</span></div>
     <h3>${escapeHtml(team.name)}</h3>
-    ${team.presentation ? `<div class="project-name">${escapeHtml(team.presentation.title)}</div><p>${escapeHtml(team.presentation.summary)}</p>` : '<p>운영자가 발표 정보를 공개하면 프로젝트 소개와 평가 버튼이 표시됩니다.</p>'}
+    ${team.presentation ? `<div class="project-name">${escapeHtml(team.presentation.title)}</div><p>${escapeHtml(team.presentation.summary)}</p>` : `<p>${team.isOwnTeam ? '내 팀의 프로젝트명과 소개를 등록해 발표를 준비하세요.' : '해당 팀이나 운영자가 발표 정보를 공개하면 프로젝트 소개가 표시됩니다.'}</p>`}
     ${team.published ? `<div class="team-actions participant-detail-action"><button class="secondary-btn" data-action="detail" data-id="${team.id}">발표 내용 · 자료 보기 ${icon('arrow')}</button></div>` : ''}
+    ${team.isOwnTeam ? `<div class="team-actions own-team-actions"><button class="primary-btn" data-action="publish" data-id="${team.id}">${team.published ? '내 팀 발표 수정' : '내 팀 발표 등록'}</button><button class="secondary-btn" data-action="materials" data-id="${team.id}">자료 관리</button></div>${team.published ? `<button class="reset-team-votes" data-action="unpublish" data-id="${team.id}">발표 정보 초기화</button>` : ''}` : ''}
     ${locked
       ? `<div class="locked-message"><span class="lock-icon">${icon('lock')}</span>${lockedMessage}</div>`
       : `<div class="team-actions"><button class="${team.myVote ? 'secondary-btn' : 'primary-btn'}" data-action="vote" data-id="${team.id}">${team.myVote ? `${icon('edit')} 평가 수정` : `평가하기 ${icon('arrow')}`}</button></div>`}
@@ -252,15 +259,15 @@ function operatorDashboard() {
   return `<main class="page">
     ${pageHeading(`${event.title} / control room`, '운영 대시보드', '●')}
     <section class="operator-strip">
-      <div class="metric"><small>발표 공개</small><strong>${stats.published}<em> / ${stats.total}</em></strong></div>
-      <div class="metric"><small>참가자 투표</small><strong>${totalVotes}<em> 건</em></strong></div>
-      <div class="metric"><small>참가 인원</small><strong>${stats.participants}<em> 명</em></strong></div>
-      <div class="metric"><small>평가 전용 그룹</small><strong>${stats.evaluatorTeams}<em> 팀</em></strong></div>
+      <div class="metric"><small>발표 준비</small><strong>${stats.published}<em> / ${stats.total} 팀</em></strong></div>
+      <div class="metric"><small>누적 평가</small><strong>${totalVotes}<em> 건</em></strong></div>
+      <div class="metric"><small>전체 참여자</small><strong>${stats.participants}<em> 명</em></strong></div>
+      <div class="metric"><small>평가단 인원</small><strong>${stats.evaluatorParticipants}<em> 명</em></strong></div>
     </section>
     ${operatorAttendance(attendance)}
     <div class="section-title">
       <div><h2>발표 운영</h2><p>발표 정보를 공개한 뒤 한 팀을 투표 대상으로 지정하세요.</p></div>
-      <div class="admin-toolbar"><button class="primary-btn" data-action="add-team">+ 팀 추가</button><button class="secondary-btn" data-action="next-team" ${hasNextTeam ? '' : 'disabled'}>다음 팀 투표 ${icon('arrow')}</button><a class="secondary-btn" href="/api/results/export">결과 Excel ↓</a><button class="danger-outline-btn" data-action="reset-all-votes" ${totalVotes ? '' : 'disabled'}>전체 평가 초기화</button><span class="status-chip">투표 ${event.votingOpen ? '진행' : '마감'}</span><button class="switch ${event.votingOpen ? 'on' : ''}" data-action="toggle-voting" aria-label="투표 상태 변경" ${event.activeTeamId ? '' : 'disabled'}><span></span></button></div>
+      <div class="admin-toolbar"><button class="primary-btn" data-action="add-team">+ 팀 추가</button><button class="secondary-btn" data-action="next-team" ${hasNextTeam ? '' : 'disabled'}>다음 팀 투표 ${icon('arrow')}</button><button class="secondary-btn" data-action="export-results">결과 Excel ↓</button><button class="danger-outline-btn" data-action="reset-all-votes" ${totalVotes ? '' : 'disabled'}>전체 평가 초기화</button><span class="status-chip">투표 ${event.votingOpen ? '진행' : '마감'}</span><button class="switch ${event.votingOpen ? 'on' : ''}" data-action="toggle-voting" aria-label="투표 상태 변경" ${event.activeTeamId ? '' : 'disabled'}><span></span></button></div>
     </div>
     <section class="team-grid">${teams.map(operatorTeamCard).join('')}</section>
     <div class="section-title" style="margin-top:48px"><div><h2>실시간 순위</h2><p>익명 참가자 평가 평균 기준입니다.</p></div><p>5점 만점</p></div>
@@ -295,12 +302,12 @@ function operatorAttendance(attendance) {
 function operatorTeamCard(team) {
   if (team.evaluatorOnly) {
     return `<article class="team-card evaluator-team-card" style="--team-color:${team.color}">
-      <div class="team-meta"><span class="team-number">EVALUATOR GROUP</span><span class="mini-state own">평가 전용</span></div>
+      <div class="team-meta"><span class="team-number">REVIEW PANEL</span><span class="mini-state own">평가단</span></div>
       <h3>${escapeHtml(team.name)}</h3>
       <button class="team-code" data-action="copy-team-code" data-id="${team.id}" title="참가 코드 복사"><span>JOIN CODE</span><strong>${escapeHtml(team.code)}</strong>${icon('copy')}</button>
       <p>발표와 순위에서 제외되며, 소속 인원은 모든 발표 팀을 평가할 수 있습니다.</p>
       <div class="material-count">가입 인원 <strong>${team.memberCount}</strong>명</div>
-      <button class="danger-btn" data-action="delete-team" data-id="${team.id}">평가 전용 그룹 삭제</button>
+      <button class="danger-btn" data-action="delete-team" data-id="${team.id}">평가단 삭제</button>
     </article>`;
   }
   const evaluationCount = team.participantVoteCount;
@@ -324,11 +331,11 @@ function operatorTeamCard(team) {
 
 function materialLinks(team) {
   return `<div class="material-links">${team.materials.map((material) => `
-    <a href="/api/materials/${material.id}/download?inline=1" class="material-link" target="_blank" rel="noopener">
+    <button type="button" class="material-link" data-action="open-material" data-id="${material.id}" data-name="${escapeHtml(material.originalName)}">
       <span class="file-badge">${escapeHtml(fileExtension(material.originalName))}</span>
       <span>${escapeHtml(material.originalName)}<small>${formatBytes(material.size)}</small></span>
       <b>↗</b>
-    </a>`).join('')}</div>`;
+    </button>`).join('')}</div>`;
 }
 
 function fileExtension(name) {
@@ -406,7 +413,7 @@ function teamModal() {
       <div class="field"><label for="new-team-name">팀 이름</label><input id="new-team-name" name="name" maxlength="40" placeholder="예: Rocket Lab" required></div>
       <div class="field"><label for="new-team-code">참가 코드</label><input id="new-team-code" name="code" minlength="4" maxlength="20" pattern="[A-Za-z0-9-]+" placeholder="예: ROCKET26" required><span class="field-hint">참가자가 가입할 때 사용할 고유 코드입니다.</span></div>
       <div class="field"><label for="new-team-color">팀 색상</label><div class="color-picker"><input id="new-team-color" name="color" type="color" value="#f05a2a"><span>팀 카드와 상태 표시에 사용됩니다.</span></div></div>
-      <label class="option-toggle"><input type="checkbox" name="evaluatorOnly"><span><strong>발표 없이 평가만 참여</strong><small>선생님·대학생 평가단처럼 발표 순서와 순위에서 제외할 그룹에 사용합니다.</small></span></label>
+      <label class="option-toggle"><input type="checkbox" name="evaluatorOnly"><span><strong>평가단으로 참여</strong><small>선생님·대학생처럼 발표 없이 심사에만 참여하며 발표 순서와 순위에서 제외됩니다.</small></span></label>
       <div class="form-error" id="modal-error"></div>
       <div class="modal-actions"><button type="button" class="secondary-btn" data-action="close-modal">취소</button><button type="submit" class="primary-btn lime">팀 추가 ${icon('arrow')}</button></div>
     </form>`);
@@ -417,7 +424,7 @@ function materialsModal(team) {
     <div class="material-manage-row">
       <span class="file-badge">${escapeHtml(fileExtension(material.originalName))}</span>
       <div><strong>${escapeHtml(material.originalName)}</strong><small>${formatBytes(material.size)}</small></div>
-      <a class="ghost-btn" href="/api/materials/${material.id}/download" download aria-label="내려받기">↓</a>
+      <button class="ghost-btn" type="button" data-action="download-material" data-id="${material.id}" data-name="${escapeHtml(material.originalName)}" aria-label="내려받기">↓</button>
       <button class="delete-file" type="button" data-action="delete-material" data-id="${material.id}" data-team-id="${team.id}" aria-label="삭제">×</button>
     </div>`).join('') : '<div class="empty-materials">등록된 발표자료가 없습니다.</div>';
   return modalShell(`${team.name} / materials`, '발표자료 관리', `
@@ -425,8 +432,8 @@ function materialsModal(team) {
     <form id="material-form" data-team-id="${team.id}">
       <label class="upload-zone" for="material-file">
         <strong>업로드할 파일을 선택하세요.</strong>
-        <span>PDF, PPT, PPTX, PNG, JPG · 파일당 최대 10MB · 최대 5개</span>
-        <input id="material-file" name="file" type="file" accept=".pdf,.ppt,.pptx,.png,.jpg,.jpeg,.webp" ${team.materials.length >= 5 ? 'disabled' : ''} required>
+        <span>PDF, PPT, Word, Excel, HWP/HWPX, TXT/MD/CSV, 이미지, ZIP · 최대 10MB · 최대 5개</span>
+        <input id="material-file" name="file" type="file" accept=".pdf,.ppt,.pptx,.doc,.docx,.xls,.xlsx,.hwp,.hwpx,.txt,.md,.csv,.zip,.png,.jpg,.jpeg,.webp,.gif" ${team.materials.length >= 5 ? 'disabled' : ''} required>
       </label>
       <div class="selected-file" id="selected-file">선택된 파일 없음</div>
       <div class="form-error" id="modal-error"></div>
@@ -529,6 +536,7 @@ async function handleAuthSubmit(form, endpoint) {
       renderAuth();
       document.querySelector('#login-email').value = values.email;
     } else {
+      window.sessionStorage.setItem(SESSION_KEY, data.token);
       state.user = data.user;
       await loadDashboard();
     }
@@ -600,6 +608,7 @@ async function handlePasswordSubmit(form) {
       method: 'POST',
       body: JSON.stringify({ currentPassword: values.currentPassword, newPassword: values.newPassword })
     });
+    if (result.token) window.sessionStorage.setItem(SESSION_KEY, result.token);
     closeModal();
     toast(result.message);
   } catch (error) {
@@ -627,6 +636,34 @@ function fileAsDataUrl(file) {
     reader.onerror = () => reject(new Error('파일을 읽지 못했습니다.'));
     reader.readAsDataURL(file);
   });
+}
+
+async function downloadProtectedFile(url, fileName, openInNewTab = false) {
+  const token = window.sessionStorage.getItem(SESSION_KEY);
+  const popup = openInNewTab ? window.open('', '_blank') : null;
+  if (popup) popup.opener = null;
+  try {
+    const response = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || '파일을 불러오지 못했습니다.');
+    }
+    const objectUrl = URL.createObjectURL(await response.blob());
+    if (popup) {
+      popup.location.href = objectUrl;
+    } else {
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  } catch (error) {
+    popup?.close();
+    throw error;
+  }
 }
 
 async function handleMaterialSubmit(form) {
@@ -665,6 +702,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'logout') {
     await api('/api/logout', { method: 'POST' });
+    window.sessionStorage.removeItem(SESSION_KEY);
     stopAutoRefresh();
     state.user = null;
     state.dashboard = null;
@@ -694,6 +732,27 @@ document.addEventListener('click', async (event) => {
     } catch (error) {
       target.disabled = false;
       toast(error.message, 'error');
+    }
+  }
+  if (action === 'export-results') {
+    target.disabled = true;
+    try {
+      await downloadProtectedFile('/api/results/export', `hackathon-results-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast('Excel 결과 파일을 만들었습니다.');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      target.disabled = false;
+    }
+  }
+  if (action === 'open-material' || action === 'download-material') {
+    target.disabled = true;
+    try {
+      await downloadProtectedFile(`/api/materials/${target.dataset.id}/download${action === 'open-material' ? '?inline=1' : ''}`, target.dataset.name || 'material', action === 'open-material');
+    } catch (error) {
+      toast(error.message, 'error');
+    } finally {
+      target.disabled = false;
     }
   }
   if (action === 'delete-material') {
@@ -837,7 +896,10 @@ async function init() {
     const data = await api('/api/me');
     state.user = data.user;
     if (state.user) await loadDashboard();
-    else renderAuth();
+    else {
+      window.sessionStorage.removeItem(SESSION_KEY);
+      renderAuth();
+    }
   } catch (error) {
     app.innerHTML = `<div class="empty-state" style="margin:10vh auto;max-width:500px"><strong>서버에 연결할 수 없습니다.</strong>${escapeHtml(error.message)}</div>`;
   }
