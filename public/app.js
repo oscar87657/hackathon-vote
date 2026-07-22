@@ -10,10 +10,16 @@ const state = {
 };
 
 const scoreMeta = [
-  ['originality', '독창성', '아이디어가 새롭고 차별화되었나요?'],
-  ['completion', '완성도', '핵심 기능이 안정적으로 구현되었나요?'],
-  ['impact', '파급력', '실제 문제를 의미 있게 해결하나요?'],
-  ['presentation', '발표력', '문제와 해결책을 명확히 전달했나요?']
+  ['problemValue', 'Q1. 문제 발견의 적절성 및 공익성', '누가 이 문제로 고통받는지, 명확한 공익적 가치가 보이는가?', '1단계 · 문제 정의'],
+  ['goalSpecificity', 'Q2. 목표의 구체성', '타겟의 페인포인트와 최종 목표가 구체적인 상황이나 지표로 정의됐는가?', '1단계 · 문제 정의'],
+  ['solutionFit', 'Q3. 문제 해결 과정의 적합성', '논리적 비약 없이 비용과 시간 대비 효율적인 해결책인가?', '2단계 · 솔루션 및 기술'],
+  ['solutionOriginality', 'Q4. 문제 해결 과정의 참신성', '기존 솔루션과 비교해 확실한 우위나 독창적인 접근이 있는가?', '2단계 · 솔루션 및 기술'],
+  ['aiRelevance', 'Q5. AI 기술 활용의 적절성', 'AI가 핵심 병목을 해결하며 일반 소프트웨어보다 명확한 이점을 주는가?', '2단계 · 솔루션 및 기술'],
+  ['feasibility', 'Q6. 현실적 실현 가능성', '현존 기술과 시장 환경에서 실제 상용화가 가능하며 근거가 있는가?', '2단계 · 솔루션 및 기술'],
+  ['structuralCompleteness', 'Q7. 문제 해결 과정의 구조적 완성도', '문제·원인·솔루션·기대효과의 흐름이 빈틈없이 연결되는가?', '3단계 · 논리 구조 및 전달력'],
+  ['impactScalability', 'Q8. 아이디어의 파급력 및 확장성', '긍정적 영향이 납득 가능하고 지속 가능한 성장 가능성이 있는가?', '3단계 · 논리 구조 및 전달력'],
+  ['pitchQuality', 'Q9. 발표 완성도', '자료의 시각적 완성도와 제한 시간 내 전달력이 충분한가?', '3단계 · 논리 구조 및 전달력'],
+  ['attitudeDefense', 'Q10. 태도 및 디펜스 능력', '질문과 비판을 유연하고 논리적으로 수용하며 답변하는가?', '4단계 · 창업가적 태도']
 ];
 
 function escapeHtml(value) {
@@ -206,7 +212,7 @@ function participantDashboard() {
         <strong>${activeTeam ? `지금은 ${escapeHtml(activeTeam.name)} 평가 시간이에요.` : '다음 팀이 지정되면 알려드릴게요.'}</strong>
       </div>
     </section>
-    <div class="section-title"><div><h2>발표 팀</h2><p>운영자가 지정한 팀만 투표할 수 있습니다.</p></div><p>총점은 4개 항목의 평균으로 집계됩니다.</p></div>
+    <div class="section-title"><div><h2>발표 팀</h2><p>모든 공개 발표의 내용과 자료를 볼 수 있으며, 운영자가 지정한 팀만 평가할 수 있습니다.</p></div><p>총점은 10개 항목의 평균입니다.</p></div>
     <section class="team-grid">${teams.map(participantTeamCard).join('')}</section>
   </main>`;
 }
@@ -229,7 +235,7 @@ function participantTeamCard(team) {
     <div class="team-meta"><span class="team-number">TEAM / ${String(team.order).padStart(2, '0')}</span><span class="mini-state ${stateClass}">${stateLabel}</span></div>
     <h3>${escapeHtml(team.name)}</h3>
     ${team.presentation ? `<div class="project-name">${escapeHtml(team.presentation.title)}</div><p>${escapeHtml(team.presentation.summary)}</p>` : '<p>운영자가 발표 정보를 공개하면 프로젝트 소개와 평가 버튼이 표시됩니다.</p>'}
-    ${team.published && team.materials.length ? materialLinks(team) : ''}
+    ${team.published ? `<div class="team-actions participant-detail-action"><button class="secondary-btn" data-action="detail" data-id="${team.id}">발표 내용 · 자료 보기 ${icon('arrow')}</button></div>` : ''}
     ${locked
       ? `<div class="locked-message"><span class="lock-icon">${icon('lock')}</span>${lockedMessage}</div>`
       : `<div class="team-actions"><button class="${team.myVote ? 'secondary-btn' : 'primary-btn'}" data-action="vote" data-id="${team.id}">${team.myVote ? `${icon('edit')} 평가 수정` : `평가하기 ${icon('arrow')}`}</button></div>`}
@@ -294,12 +300,13 @@ function operatorTeamCard(team) {
     <h3>${escapeHtml(team.name)}</h3>
     <button class="team-code" data-action="copy-team-code" data-id="${team.id}" title="참가 코드 복사"><span>JOIN CODE</span><strong>${escapeHtml(team.code)}</strong>${icon('copy')}</button>
     ${team.presentation ? `<div class="project-name">${escapeHtml(team.presentation.title)}</div><p>${escapeHtml(team.presentation.summary)}</p>` : '<p>프로젝트 이름과 소개를 등록하면 참가자 대시보드에 즉시 공개됩니다.</p>'}
+    ${myReview ? `<div class="review-preview"><strong>${icon('check')} 저장된 한 줄 평가</strong><span>${escapeHtml(myReview.comment)}</span></div>` : ''}
     <div class="material-count">발표자료 <strong>${team.materials.length}</strong> / 5</div>
     <div class="team-actions">
       <button class="secondary-btn" data-action="publish" data-id="${team.id}">${icon('edit')} ${team.published ? '발표 수정' : '발표 공개'}</button>
       <button class="secondary-btn" data-action="materials" data-id="${team.id}">자료 관리</button>
       ${team.published ? `<button class="primary-btn" data-action="review" data-id="${team.id}">${myReview ? icon('check') + ' 평가 수정' : '운영 평가'}</button>` : ''}
-      ${team.published ? `<button class="secondary-btn" data-action="result" data-id="${team.id}" aria-label="결과 보기">${icon('chart')}</button>` : ''}
+      ${team.published ? `<button class="secondary-btn" data-action="result" data-id="${team.id}">${icon('chart')} 결과·의견</button>` : ''}
     </div>
     ${team.published ? `<div class="team-actions voting-action"><button class="${team.isActive ? 'secondary-btn' : 'primary-btn accent'}" data-action="activate-team" data-id="${team.id}" ${team.isActive ? 'disabled' : ''}>${team.isActive ? `${icon('check')} 현재 투표 진행 팀` : `이 팀 투표 시작 ${icon('arrow')}`}</button></div>` : ''}
     <button class="danger-btn" data-action="delete-team" data-id="${team.id}">팀 삭제</button>
@@ -308,10 +315,10 @@ function operatorTeamCard(team) {
 
 function materialLinks(team) {
   return `<div class="material-links">${team.materials.map((material) => `
-    <a href="/api/materials/${material.id}/download" class="material-link" download>
+    <a href="/api/materials/${material.id}/download?inline=1" class="material-link" target="_blank" rel="noopener">
       <span class="file-badge">${escapeHtml(fileExtension(material.originalName))}</span>
       <span>${escapeHtml(material.originalName)}<small>${formatBytes(material.size)}</small></span>
-      <b>↓</b>
+      <b>↗</b>
     </a>`).join('')}</div>`;
 }
 
@@ -335,13 +342,18 @@ function rankRow(team, index) {
 }
 
 function scoreFields(values = {}) {
-  return scoreMeta.map(([key, label, description]) => `
+  let currentStage = '';
+  return scoreMeta.map(([key, label, description, stage]) => {
+    const heading = stage !== currentStage ? `<div class="score-stage"><span>${escapeHtml(stage)}</span></div>` : '';
+    currentStage = stage;
+    return `${heading}
     <div class="score-field">
       <div class="score-label"><strong>${label}</strong><span>${description}</span></div>
       <div class="score-options">
         ${[1,2,3,4,5].map((score) => `<span><input type="radio" id="${key}-${score}" name="${key}" value="${score}" ${Number(values[key]) === score ? 'checked' : ''} required><label for="${key}-${score}">${score}</label></span>`).join('')}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function openModal(type, teamId) {
@@ -364,6 +376,7 @@ function openModal(type, teamId) {
   if (type === 'materials') root.innerHTML = materialsModal(team);
   if (type === 'review') root.innerHTML = reviewModal(team);
   if (type === 'result') root.innerHTML = resultModal(team);
+  if (type === 'detail') root.innerHTML = detailModal(team);
   document.body.style.overflow = 'hidden';
 }
 
@@ -432,6 +445,23 @@ function voteModal(team) {
     </form>`);
 }
 
+function detailModal(team) {
+  const presentation = team.presentation;
+  const materialSection = team.materials.length
+    ? materialLinks(team)
+    : '<div class="empty-materials">등록된 발표자료가 없습니다.</div>';
+  return modalShell(`${team.name} / presentation`, presentation.title, `
+    <div class="presentation-category">${escapeHtml(presentation.category || '기타')}</div>
+    <section class="presentation-detail">
+      <h3>프로젝트 소개</h3>
+      <p>${escapeHtml(presentation.summary)}</p>
+      ${presentation.details ? `<h3>발표 내용</h3><p class="preserve-lines">${escapeHtml(presentation.details)}</p>` : ''}
+    </section>
+    <div class="section-title material-section-title"><div><h2>발표자료</h2><p>파일을 누르면 새 창에서 열립니다.</p></div><span>${team.materials.length}개</span></div>
+    ${materialSection}
+    <div class="modal-actions"><button type="button" class="secondary-btn" data-action="close-modal">닫기</button></div>`);
+}
+
 function publishModal(team) {
   const presentation = team.presentation || {};
   return modalShell(`${team.name} / presentation`, team.published ? '발표 정보 수정' : '발표 공개하기', `
@@ -440,6 +470,7 @@ function publishModal(team) {
         <div class="field"><label for="project-title">프로젝트명</label><input id="project-title" name="title" maxlength="80" value="${escapeHtml(presentation.title || '')}" placeholder="프로젝트 이름" required></div>
         <div class="field"><label for="category">분야</label><select id="category" name="category"><option value="AI" ${presentation.category === 'AI' ? 'selected':''}>AI</option><option value="WEB" ${presentation.category === 'WEB' ? 'selected':''}>Web / App</option><option value="SOCIAL" ${presentation.category === 'SOCIAL' ? 'selected':''}>소셜 임팩트</option><option value="ETC" ${presentation.category === 'ETC' ? 'selected':''}>기타</option></select></div>
         <div class="field full"><label for="project-summary">프로젝트 소개</label><textarea id="project-summary" name="summary" minlength="10" maxlength="500" placeholder="해결하려는 문제와 핵심 기능을 소개해 주세요." required>${escapeHtml(presentation.summary || '')}</textarea></div>
+        <div class="field full"><label for="project-details">발표 내용 <span style="color:var(--muted);font-weight:400">(선택)</span></label><textarea id="project-details" name="details" maxlength="3000" placeholder="문제 정의, 해결 방법, 주요 기능, 기대 효과 등 참가자가 볼 내용을 자세히 적어 주세요.">${escapeHtml(presentation.details || '')}</textarea></div>
       </div>
       <div class="form-error" id="modal-error"></div>
       <div class="modal-actions"><button type="button" class="secondary-btn" data-action="close-modal">취소</button><button type="submit" class="primary-btn lime">${team.published ? '수정 내용 저장' : '참가자에게 공개'} ${icon('arrow')}</button></div>
@@ -452,7 +483,7 @@ function reviewModal(team) {
     <div class="project-brief"><strong>${escapeHtml(team.presentation.title)}</strong>${escapeHtml(team.presentation.summary)}</div>
     <form id="review-form" data-team-id="${team.id}">
       ${scoreFields(review?.scores)}
-      <div class="field" style="margin-top:20px"><label for="review-comment">심사 의견 <span style="color:var(--muted);font-weight:400">(선택)</span></label><textarea id="review-comment" name="comment" maxlength="500" placeholder="심사 의견을 기록해 주세요.">${escapeHtml(review?.comment || '')}</textarea></div>
+      <div class="field" style="margin-top:20px"><label for="review-comment">한 줄 평가</label><textarea id="review-comment" name="comment" minlength="3" maxlength="500" placeholder="가장 강한 점 1가지 + 가장 보완해야 할 점 1가지를 적어 주세요." required>${escapeHtml(review?.comment || '')}</textarea></div>
       <div class="form-error" id="modal-error"></div>
       <div class="modal-actions"><button type="button" class="secondary-btn" data-action="close-modal">취소</button><button type="submit" class="primary-btn">평가 저장 ${icon('arrow')}</button></div>
     </form>`);
@@ -519,7 +550,7 @@ async function handleModalSubmit(form, kind) {
     let payload;
     if (kind === 'publish') {
       url = `/api/teams/${teamId}/presentation`;
-      payload = { title: values.title, category: values.category, summary: values.summary };
+      payload = { title: values.title, category: values.category, summary: values.summary, details: values.details };
     } else {
       url = `/api/teams/${teamId}/${kind}`;
       payload = { scores: formScores(form), comment: values.comment };
@@ -638,7 +669,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'account') openModal('account');
   if (action === 'add-team') openModal('add-team');
-  if (['vote', 'publish', 'materials', 'review', 'result'].includes(action)) openModal(action, target.dataset.id);
+  if (['vote', 'publish', 'materials', 'review', 'result', 'detail'].includes(action)) openModal(action, target.dataset.id);
   if (action === 'close-modal') closeModal();
   if (action === 'backdrop' && event.target === target) closeModal();
   if (action === 'copy-team-code') {

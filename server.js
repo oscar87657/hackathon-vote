@@ -31,9 +31,33 @@ const supabase = SUPABASE_URL ? createClient(SUPABASE_URL, SUPABASE_KEY, {
 const SESSION_SECRET = process.env.SESSION_SECRET || SUPABASE_KEY || crypto.randomBytes(32).toString('hex');
 let db;
 let writeQueue = Promise.resolve();
+let apiRequestQueue = Promise.resolve();
 let generatedAdminPassword = null;
 
-const scoreKeys = ['originality', 'completion', 'impact', 'presentation'];
+const scoreKeys = [
+  'problemValue',
+  'goalSpecificity',
+  'solutionFit',
+  'solutionOriginality',
+  'aiRelevance',
+  'feasibility',
+  'structuralCompleteness',
+  'impactScalability',
+  'pitchQuality',
+  'attitudeDefense'
+];
+const legacyScoreMap = {
+  problemValue: 'impact',
+  goalSpecificity: 'impact',
+  solutionFit: 'completion',
+  solutionOriginality: 'originality',
+  aiRelevance: 'originality',
+  feasibility: 'completion',
+  structuralCompleteness: 'presentation',
+  impactScalability: 'impact',
+  pitchQuality: 'presentation',
+  attitudeDefense: 'presentation'
+};
 const materialMimeTypes = {
   '.pdf': 'application/pdf',
   '.ppt': 'application/vnd.ms-powerpoint',
@@ -123,7 +147,7 @@ function seedDatabase() {
       subtitle: 'Demo Day · Seoul 2026',
       votingOpen: false,
       activeTeamId: null,
-      schemaVersion: 3,
+      schemaVersion: 4,
       updatedAt: new Date().toISOString()
     },
     teams: includeDemoData ? demoTeams : [],
@@ -207,6 +231,21 @@ async function loadDatabase() {
       if (!process.env.ADMIN_PASSWORD) generatedAdminPassword = replacementPassword;
     }
     db.event.schemaVersion = 3;
+    migrated = true;
+  }
+  if (Number(db.event.schemaVersion || 0) < 4) {
+    for (const item of [...db.operatorReviews, ...db.votes]) {
+      const previous = item.scores || {};
+      if (scoreKeys.every((key) => Number.isInteger(Number(previous[key])))) continue;
+      item.scores = Object.fromEntries(scoreKeys.map((key) => {
+        const legacyValue = Number(previous[legacyScoreMap[key]]);
+        return [key, Number.isInteger(legacyValue) && legacyValue >= 1 && legacyValue <= 5 ? legacyValue : 3];
+      }));
+    }
+    for (const presentation of db.presentations) {
+      if (!Object.hasOwn(presentation, 'details')) presentation.details = '';
+    }
+    db.event.schemaVersion = 4;
     migrated = true;
   }
   if (stored.migrateLocalFiles) await migrateLocalMaterialFiles();
@@ -378,10 +417,10 @@ function validateScores(body) {
 }
 
 function averageScores(items) {
-  if (!items.length) return { originality: 0, completion: 0, impact: 0, presentation: 0, total: 0 };
+  if (!items.length) return { ...Object.fromEntries(scoreKeys.map((key) => [key, 0])), total: 0 };
   const averages = {};
   for (const key of scoreKeys) {
-    averages[key] = items.reduce((sum, item) => sum + item.scores[key], 0) / items.length;
+    averages[key] = items.reduce((sum, item) => sum + Number(item.scores[key] || 0), 0) / items.length;
   }
   averages.total = scoreKeys.reduce((sum, key) => sum + averages[key], 0) / scoreKeys.length;
   return averages;
@@ -623,11 +662,12 @@ async function handleApi(req, res, pathname) {
     const body = await readBody(req);
     const title = cleanText(body.title, 80);
     const summary = cleanText(body.summary, 500);
+    const details = cleanText(body.details, 3000);
     if (title.length < 2 || summary.length < 10) return error(res, 400, '프로젝트명과 10자 이상의 소개를 입력해 주세요.');
     const now = new Date().toISOString();
     const existing = db.presentations.find((item) => item.teamId === teamId);
-    if (existing) Object.assign(existing, { title, summary, category: cleanText(body.category, 30), updatedAt: now, publishedBy: user.id });
-    else db.presentations.push({ id: id('presentation'), teamId, title, summary, category: cleanText(body.category, 30), createdAt: now, updatedAt: now, publishedBy: user.id });
+    if (existing) Object.assign(existing, { title, summary, details, category: cleanText(body.category, 30), updatedAt: now, publishedBy: user.id });
+    else db.presentations.push({ id: id('presentation'), teamId, title, summary, details, category: cleanText(body.category, 30), createdAt: now, updatedAt: now, publishedBy: user.id });
     await saveDatabase();
     return json(res, 200, { team: teamPayload(team, user, true) });
   }
@@ -684,7 +724,7 @@ async function handleApi(req, res, pathname) {
       res.writeHead(200, {
         'Content-Type': material.mimeType,
         'Content-Length': file.length,
-        'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(material.originalName)}`,
+        'Content-Disposition': `${new URL(req.url, 'http://localhost').searchParams.get('inline') === '1' ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(material.originalName)}`,
         'Cache-Control': 'private, no-store'
       });
       return res.end(file);
@@ -716,10 +756,12 @@ async function handleApi(req, res, pathname) {
     const body = await readBody(req);
     const scores = validateScores(body.scores || {});
     if (!scores) return error(res, 400, '모든 평가 항목에 1~5점을 입력해 주세요.');
+    const comment = cleanText(body.comment, 500);
+    if (comment.length < 3) return error(res, 400, '가장 강한 점과 보완할 점을 포함한 한 줄 평가를 입력해 주세요.');
     const now = new Date().toISOString();
     const existing = db.operatorReviews.find((item) => item.teamId === teamId && item.userId === user.id);
-    if (existing) Object.assign(existing, { scores, comment: cleanText(body.comment, 500), updatedAt: now });
-    else db.operatorReviews.push({ id: id('review'), teamId, userId: user.id, scores, comment: cleanText(body.comment, 500), createdAt: now, updatedAt: now });
+    if (existing) Object.assign(existing, { scores, comment, updatedAt: now });
+    else db.operatorReviews.push({ id: id('review'), teamId, userId: user.id, scores, comment, createdAt: now, updatedAt: now });
     await saveDatabase();
     return json(res, 200, { message: '운영자 평가가 저장되었습니다.' });
   }
@@ -775,7 +817,20 @@ function createServer() {
   return http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-      if (url.pathname.startsWith('/api/')) await handleApi(req, res, url.pathname);
+      // Vercel의 여러 실행 인스턴스가 오래된 메모리 상태로 최신 평가를
+      // 덮어쓰지 않도록 API 요청마다 Supabase의 최신 상태를 읽는다.
+      if (url.pathname.startsWith('/api/')) {
+        const processRequest = async () => {
+          if (supabase && url.pathname !== '/api/health') {
+            const stored = await readStoredDatabase();
+            db = stored.database;
+          }
+          await handleApi(req, res, url.pathname);
+        };
+        const queuedRequest = apiRequestQueue.catch(() => {}).then(processRequest);
+        apiRequestQueue = queuedRequest;
+        await queuedRequest;
+      }
       else await serveStatic(res, url.pathname);
     } catch (err) {
       console.error(err);

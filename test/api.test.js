@@ -9,6 +9,19 @@ let child;
 let baseUrl;
 let tempDir;
 
+const validScores = {
+  problemValue: 5,
+  goalSpecificity: 4,
+  solutionFit: 4,
+  solutionOriginality: 5,
+  aiRelevance: 4,
+  feasibility: 4,
+  structuralCompleteness: 5,
+  impactScalability: 5,
+  pitchQuality: 4,
+  attitudeDefense: 5
+};
+
 async function request(pathname, options = {}, cookie = '') {
   const response = await fetch(`${baseUrl}${pathname}`, {
     ...options,
@@ -74,9 +87,14 @@ test('운영자 공개 → 운영 평가 → 참가자 투표 → 마감 흐름'
 
   result = await request('/api/teams/team_pixel/review', {
     method: 'POST',
-    body: JSON.stringify({ scores: { originality: 5, completion: 4, impact: 5, presentation: 4 }, comment: '좋은 문제 해결입니다.' })
+    body: JSON.stringify({ scores: validScores, comment: '문제 정의가 강하며, 시장 근거를 더 보완하면 좋겠습니다.' })
   }, operatorCookie);
   assert.equal(result.response.status, 200);
+
+  result = await request('/api/dashboard', {}, operatorCookie);
+  const savedReview = result.body.teams.find((team) => team.id === 'team_pixel').operatorReviews[0];
+  assert.equal(savedReview.comment, '문제 정의가 강하며, 시장 근거를 더 보완하면 좋겠습니다.');
+  assert.equal(savedReview.scores.aiRelevance, 4);
 
   result = await request('/api/teams/team_green/presentation', {
     method: 'POST',
@@ -98,25 +116,25 @@ test('운영자 공개 → 운영 평가 → 참가자 투표 → 마감 흐름'
   const participantCookie = await login('nova@hackathon.kr', 'vote1234');
   result = await request('/api/teams/team_nova/vote', {
     method: 'POST',
-    body: JSON.stringify({ scores: { originality: 5, completion: 5, impact: 5, presentation: 5 } })
+    body: JSON.stringify({ scores: validScores })
   }, participantCookie);
   assert.equal(result.response.status, 403);
 
   result = await request('/api/teams/team_green/vote', {
     method: 'POST',
-    body: JSON.stringify({ scores: { originality: 5, completion: 5, impact: 5, presentation: 5 } })
+    body: JSON.stringify({ scores: validScores })
   }, participantCookie);
   assert.equal(result.response.status, 403);
 
   result = await request('/api/teams/team_pixel/vote', {
     method: 'POST',
-    body: JSON.stringify({ scores: { originality: 4, completion: 4, impact: 5, presentation: 4 }, comment: '응원합니다.' })
+    body: JSON.stringify({ scores: validScores, comment: '응원합니다.' })
   }, participantCookie);
   assert.equal(result.response.status, 200);
 
   result = await request('/api/dashboard', {}, participantCookie);
   assert.equal(result.body.stats.myVotes, 1);
-  assert.equal(result.body.teams.find((team) => team.id === 'team_pixel').myVote.scores.impact, 5);
+  assert.equal(result.body.teams.find((team) => team.id === 'team_pixel').myVote.scores.impactScalability, 5);
 
   result = await request('/api/dashboard', {}, operatorCookie);
   assert.equal(result.body.attendance.voted.length, 1);
@@ -128,7 +146,7 @@ test('운영자 공개 → 운영 평가 → 참가자 투표 → 마감 흐름'
 
   result = await request('/api/teams/team_pixel/vote', {
     method: 'POST',
-    body: JSON.stringify({ scores: { originality: 3, completion: 3, impact: 3, presentation: 3 } })
+    body: JSON.stringify({ scores: validScores })
   }, participantCookie);
   assert.equal(result.response.status, 403);
 
@@ -194,11 +212,23 @@ test('운영자 팀 추가와 발표자료 업로드·다운로드', async () =>
 
   result = await request(`/api/teams/${teamId}/presentation`, {
     method: 'POST',
-    body: JSON.stringify({ title: '로켓 데모', category: 'ETC', summary: '더 빠른 발표 준비를 돕는 협업 프로젝트입니다.' })
+    body: JSON.stringify({
+      title: '로켓 데모',
+      category: 'ETC',
+      summary: '더 빠른 발표 준비를 돕는 협업 프로젝트입니다.',
+      details: '발표자의 리허설을 분석하고 핵심 개선점을 제안합니다.'
+    })
   }, operatorCookie);
   assert.equal(result.response.status, 200);
+  result = await request('/api/dashboard', {}, participantCookie);
+  const publishedTeam = result.body.teams.find((team) => team.id === teamId);
+  assert.equal(publishedTeam.presentation.details, '발표자의 리허설을 분석하고 핵심 개선점을 제안합니다.');
+  assert.equal(publishedTeam.materials[0].originalName, 'rocket-demo.pdf');
   download = await fetch(`${baseUrl}/api/materials/${materialId}/download`, { headers: { Cookie: participantCookie } });
   assert.equal(download.status, 200);
+  const inline = await fetch(`${baseUrl}/api/materials/${materialId}/download?inline=1`, { headers: { Cookie: participantCookie } });
+  assert.equal(inline.status, 200);
+  assert.match(inline.headers.get('content-disposition'), /^inline;/);
 
   result = await request(`/api/teams/${teamId}`, { method: 'DELETE' }, operatorCookie);
   assert.equal(result.response.status, 200);
