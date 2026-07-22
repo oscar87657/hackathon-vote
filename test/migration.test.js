@@ -53,7 +53,7 @@ function legacyDatabase(adminPassword) {
       schemaVersion: 2,
       updatedAt: new Date().toISOString()
     },
-    teams: [],
+    teams: [{ id: 'team_legacy', name: '기존 팀', code: 'LEGACY26', color: '#7657ff', order: 1 }],
     users: [{
       id: 'user_operator',
       name: '관리자',
@@ -105,14 +105,10 @@ test('이전 데모 관리자 비밀번호를 환경 변수 값으로 교체한�
     assert.equal((await login(server.baseUrl, 'admin1234')).status, 401);
     assert.equal((await login(server.baseUrl, replacementPassword)).status, 200);
     const migrated = JSON.parse(await fs.readFile(dataFile, 'utf8'));
-    assert.equal(migrated.event.schemaVersion, 6);
+    assert.equal(migrated.event.schemaVersion, 7);
     assert.equal(verifyPassword(replacementPassword, migrated.users[0].passwordHash), true);
-    assert.equal(migrated.operatorReviews[0].scores.solutionOriginality, 5);
-    assert.equal(migrated.operatorReviews[0].scores.feasibility, 4);
-    assert.equal(migrated.operatorReviews[0].scores.problemValue, 3);
-    assert.equal(migrated.operatorReviews[0].scores.pitchQuality, 2);
-    assert.equal(migrated.operatorReviews[0].comment, '기존 심사 의견');
-    assert.equal(migrated.operatorReviews[0].reviewerName, '관리자');
+    assert.equal(migrated.operatorReviews.length, 0);
+    assert.equal(migrated.teams[0].evaluatorOnly, false);
     assert.equal(migrated.presentations[0].published, true);
   } finally {
     server.child.kill('SIGTERM');
@@ -130,7 +126,7 @@ test('사용자가 변경한 관리자 비밀번호는 마이그레이션 후에
     assert.equal((await login(server.baseUrl, customPassword)).status, 200);
     assert.equal((await login(server.baseUrl, 'Ignored-Replacement-2026!')).status, 401);
     const migrated = JSON.parse(await fs.readFile(dataFile, 'utf8'));
-    assert.equal(migrated.event.schemaVersion, 6);
+    assert.equal(migrated.event.schemaVersion, 7);
     assert.equal(verifyPassword(customPassword, migrated.users[0].passwordHash), true);
   } finally {
     server.child.kill('SIGTERM');

@@ -160,7 +160,7 @@ function seedDatabase() {
       subtitle: 'Demo Day · Seoul 2026',
       votingOpen: false,
       activeTeamId: null,
-      schemaVersion: 6,
+      schemaVersion: 7,
       updatedAt: new Date().toISOString()
     },
     teams: includeDemoData ? demoTeams : [],
@@ -276,6 +276,15 @@ async function loadDatabase() {
       if (!Object.hasOwn(presentation, 'published')) presentation.published = true;
     }
     db.event.schemaVersion = 6;
+    migrated = true;
+  }
+  if (Number(db.event.schemaVersion || 0) < 7) {
+    for (const team of db.teams) {
+      if (!Object.hasOwn(team, 'evaluatorOnly')) team.evaluatorOnly = false;
+    }
+    // 별도 심사위원 평가 기능을 제거하고 참가자 평가로 단일화한다.
+    db.operatorReviews = [];
+    db.event.schemaVersion = 7;
     migrated = true;
   }
   if (stored.migrateLocalFiles) await migrateLocalMaterialFiles();
@@ -466,7 +475,6 @@ function teamPayload(team, user, includeResults = false) {
   const published = Boolean(storedPresentation && storedPresentation.published !== false);
   const presentation = user?.role === 'operator' || published ? storedPresentation : null;
   const myVote = user ? db.votes.find((item) => item.teamId === team.id && item.userId === user.id) : null;
-  const operatorReviews = db.operatorReviews.filter((item) => item.teamId === team.id);
   const votes = db.votes.filter((item) => item.teamId === team.id);
   const storedMaterials = db.materials
     .filter((item) => item.teamId === team.id)
@@ -478,6 +486,8 @@ function teamPayload(team, user, includeResults = false) {
     ...(user?.role === 'operator' ? { code: team.code } : {}),
     color: team.color,
     order: team.order,
+    evaluatorOnly: Boolean(team.evaluatorOnly),
+    ...(user?.role === 'operator' ? { memberCount: db.users.filter((item) => item.teamId === team.id).length } : {}),
     published,
     presentation,
     materials,
@@ -489,31 +499,19 @@ function teamPayload(team, user, includeResults = false) {
       && db.event.votingOpen
       && published,
     myVote: published && myVote ? { scores: myVote.scores, comment: myVote.comment, updatedAt: myVote.updatedAt } : null,
-    participantVoteCount: votes.length,
-    operatorReviewCount: operatorReviews.length
+    participantVoteCount: votes.length
   };
   if (includeResults) {
     const participantAverage = averageScores(votes);
-    const operatorAverage = averageScores(operatorReviews);
-    const combined = votes.length && operatorReviews.length
-      ? (participantAverage.total * 0.6) + (operatorAverage.total * 0.4)
-      : votes.length ? participantAverage.total : operatorAverage.total;
     payload.results = {
       participant: participantAverage,
-      operator: operatorAverage,
-      combined
+      combined: participantAverage.total
     };
-    payload.operatorReviews = operatorReviews.map((review) => ({
-      ...review,
-      reviewerName: review.reviewerName || db.users.find((item) => item.id === review.userId)?.name || '심사위원'
-    }));
-    payload.participantReviews = votes.map((vote, index) => {
+    payload.participantReviews = votes.map((vote) => {
       return {
-        id: vote.id,
-        anonymousLabel: `익명 평가 ${String(index + 1).padStart(2, '0')}`,
+        anonymousLabel: `익명 ${crypto.createHash('sha256').update(vote.id).digest('hex').slice(0, 6).toUpperCase()}`,
         scores: vote.scores,
-        comment: vote.comment,
-        updatedAt: vote.updatedAt
+        comment: vote.comment
       };
     });
   }
@@ -545,15 +543,15 @@ async function createResultsWorkbook(operator) {
   workbook.creator = 'Hackathon Stage';
   workbook.created = new Date();
   const teamResults = db.teams
+    .filter((team) => !team.evaluatorOnly)
     .slice()
     .sort((a, b) => a.order - b.order)
     .map((team) => teamPayload(team, operator, true));
 
   const summary = workbook.addWorksheet('종합 결과');
   summary.addRow([
-    '순위', '팀', '프로젝트', '발표 상태', '참가자 평가 수', '심사위원 평가 수',
-    '참가자 평균', '심사위원 평균', '최종 점수',
-    ...scoreKeys.flatMap((key) => [`참가자 ${scoreLabels[key]}`, `심사위원 ${scoreLabels[key]}`])
+    '순위', '팀', '프로젝트', '발표 상태', '익명 평가 수', '최종 점수',
+    ...scoreKeys.map((key) => scoreLabels[key])
   ]);
   const ranked = teamResults.slice().sort((a, b) => b.results.combined - a.results.combined);
   ranked.forEach((team, index) => {
@@ -563,20 +561,14 @@ async function createResultsWorkbook(operator) {
       team.presentation?.title || '',
       team.published ? '공개' : '공개 전',
       team.participantVoteCount,
-      team.operatorReviewCount,
-      Number(team.results.participant.total.toFixed(3)),
-      Number(team.results.operator.total.toFixed(3)),
       Number(team.results.combined.toFixed(3)),
-      ...scoreKeys.flatMap((key) => [
-        Number(team.results.participant[key].toFixed(3)),
-        Number(team.results.operator[key].toFixed(3))
-      ])
+      ...scoreKeys.map((key) => Number(team.results.participant[key].toFixed(3)))
     ]);
   });
   finishWorksheet(summary);
 
   const participantSheet = workbook.addWorksheet('익명 참가자 평가');
-  participantSheet.addRow(['팀', '익명 구분', ...scoreKeys.map((key) => scoreLabels[key]), '평균', '익명 코멘트', '제출 시각']);
+  participantSheet.addRow(['팀', '익명 구분', ...scoreKeys.map((key) => scoreLabels[key]), '평균', '익명 코멘트']);
   for (const team of teamResults) {
     for (const review of team.participantReviews) {
       participantSheet.addRow([
@@ -584,28 +576,11 @@ async function createResultsWorkbook(operator) {
         review.anonymousLabel,
         ...scoreKeys.map((key) => Number(review.scores[key] || 0)),
         Number(averageScores([{ scores: review.scores }]).total.toFixed(3)),
-        review.comment || '',
-        review.updatedAt || ''
+        review.comment || ''
       ]);
     }
   }
   finishWorksheet(participantSheet);
-
-  const jurySheet = workbook.addWorksheet('심사위원 평가');
-  jurySheet.addRow(['팀', '심사위원', ...scoreKeys.map((key) => scoreLabels[key]), '평균', '코멘트', '제출 시각']);
-  for (const team of teamResults) {
-    for (const review of team.operatorReviews) {
-      jurySheet.addRow([
-        team.name,
-        review.reviewerName,
-        ...scoreKeys.map((key) => Number(review.scores[key] || 0)),
-        Number(averageScores([{ scores: review.scores }]).total.toFixed(3)),
-        review.comment || '',
-        review.updatedAt || ''
-      ]);
-    }
-  }
-  finishWorksheet(jurySheet);
 
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
@@ -673,7 +648,8 @@ async function handleApi(req, res, pathname) {
     const user = requireUser(req, res);
     if (!user) return;
     const includeResults = user.role === 'operator';
-    const teams = db.teams.slice().sort((a, b) => a.order - b.order).map((team) => teamPayload(team, user, includeResults));
+    const visibleTeams = user.role === 'participant' ? db.teams.filter((team) => !team.evaluatorOnly) : db.teams;
+    const teams = visibleTeams.slice().sort((a, b) => a.order - b.order).map((team) => teamPayload(team, user, includeResults));
     const activeTeam = db.event.activeTeamId ? db.teams.find((team) => team.id === db.event.activeTeamId) : null;
     const eligibleUsers = activeTeam
       ? db.users.filter((item) => item.role === 'participant' && item.teamId !== activeTeam.id)
@@ -696,7 +672,8 @@ async function handleApi(req, res, pathname) {
       attendance,
       stats: {
         published: teams.filter((team) => team.published).length,
-        total: teams.length,
+        total: db.teams.filter((team) => !team.evaluatorOnly).length,
+        evaluatorTeams: db.teams.filter((team) => team.evaluatorOnly).length,
         myVotes: user.role === 'participant' && activeTeamPayload?.myVote ? 1 : 0,
         eligible: user.role === 'participant' && activeTeamPayload && !activeTeamPayload.isOwnTeam ? 1 : 0,
         participants: db.users.filter((item) => item.role === 'participant').length
@@ -725,6 +702,7 @@ async function handleApi(req, res, pathname) {
     const name = cleanText(body.name, 40);
     const code = cleanText(body.code, 20).toUpperCase();
     const color = /^#[0-9a-f]{6}$/i.test(String(body.color || '')) ? body.color : '#f05a2a';
+    const evaluatorOnly = body.evaluatorOnly === true || body.evaluatorOnly === 'on';
     if (name.length < 2) return error(res, 400, '팀 이름을 2자 이상 입력해 주세요.');
     if (!/^[A-Z0-9-]{4,20}$/.test(code)) return error(res, 400, '참가 코드는 영문 대문자, 숫자, 하이픈으로 4~20자여야 합니다.');
     if (db.teams.some((item) => item.name.toLowerCase() === name.toLowerCase())) return error(res, 409, '이미 같은 이름의 팀이 있습니다.');
@@ -734,6 +712,7 @@ async function handleApi(req, res, pathname) {
       name,
       code,
       color,
+      evaluatorOnly,
       order: Math.max(0, ...db.teams.map((item) => item.order)) + 1
     };
     db.teams.push(team);
@@ -758,7 +737,7 @@ async function handleApi(req, res, pathname) {
     const user = requireUser(req, res, 'operator');
     if (!user) return;
     const publishedTeams = db.teams
-      .filter((team) => isPresentationPublished(team.id))
+      .filter((team) => !team.evaluatorOnly && isPresentationPublished(team.id))
       .sort((a, b) => a.order - b.order);
     if (!publishedTeams.length) return error(res, 400, '공개된 발표 팀이 없습니다.');
     const currentIndex = publishedTeams.findIndex((team) => team.id === db.event.activeTeamId);
@@ -791,6 +770,7 @@ async function handleApi(req, res, pathname) {
       } else {
         const activeTeam = db.teams.find((item) => item.id === body.activeTeamId);
         if (!activeTeam) return error(res, 404, '팀을 찾을 수 없습니다.');
+        if (activeTeam.evaluatorOnly) return error(res, 400, '평가 전용 팀은 발표 투표 대상으로 지정할 수 없습니다.');
         if (!isPresentationPublished(activeTeam.id)) return error(res, 400, '발표 정보를 공개한 팀만 투표 대상으로 지정할 수 있습니다.');
         nextActiveTeamId = activeTeam.id;
       }
@@ -810,6 +790,7 @@ async function handleApi(req, res, pathname) {
     const teamId = presentationMatch[1];
     const team = db.teams.find((item) => item.id === teamId);
     if (!team) return error(res, 404, '팀을 찾을 수 없습니다.');
+    if (team.evaluatorOnly) return error(res, 400, '평가 전용 팀에는 발표를 등록할 수 없습니다.');
     const body = await readBody(req);
     const title = cleanText(body.title, 80);
     const summary = cleanText(body.summary, 500);
@@ -829,17 +810,16 @@ async function handleApi(req, res, pathname) {
     if (!user) return;
     const team = db.teams.find((item) => item.id === presentationUnpublishMatch[1]);
     if (!team) return error(res, 404, '팀을 찾을 수 없습니다.');
-    const presentation = db.presentations.find((item) => item.teamId === team.id);
-    if (!presentation || presentation.published === false) return error(res, 400, '이미 발표 공개 전 상태입니다.');
-    presentation.published = false;
-    presentation.updatedAt = new Date().toISOString();
+    const presentationIndex = db.presentations.findIndex((item) => item.teamId === team.id && item.published !== false);
+    if (presentationIndex < 0) return error(res, 400, '이미 발표 공개 전 상태입니다.');
+    db.presentations.splice(presentationIndex, 1);
     if (db.event.activeTeamId === team.id) {
       db.event.activeTeamId = null;
       db.event.votingOpen = false;
       db.event.updatedAt = new Date().toISOString();
     }
     await saveDatabase();
-    return json(res, 200, { message: `${team.name} 발표를 공개 전 상태로 돌렸습니다.` });
+    return json(res, 200, { message: `${team.name}의 프로젝트명과 소개를 지우고 발표 전 상태로 돌렸습니다.` });
   }
 
   const materialUploadMatch = pathname.match(/^\/api\/teams\/([^/]+)\/materials$/);
@@ -849,6 +829,7 @@ async function handleApi(req, res, pathname) {
     const teamId = materialUploadMatch[1];
     const team = db.teams.find((item) => item.id === teamId);
     if (!team) return error(res, 404, '팀을 찾을 수 없습니다.');
+    if (team.evaluatorOnly) return error(res, 400, '평가 전용 팀에는 발표자료를 등록할 수 없습니다.');
     if (db.materials.filter((item) => item.teamId === teamId).length >= 5) return error(res, 400, '한 팀에는 발표자료를 최대 5개까지 등록할 수 있습니다.');
     const body = await readBody(req, 15 * 1024 * 1024);
     const originalName = path.basename(cleanText(body.fileName, 150));
@@ -914,41 +895,6 @@ async function handleApi(req, res, pathname) {
     await saveDatabase();
     await deleteStoredFiles([material.storedName]);
     return json(res, 200, { message: '발표자료를 삭제했습니다.' });
-  }
-
-  const reviewMatch = pathname.match(/^\/api\/teams\/([^/]+)\/review$/);
-  if (req.method === 'POST' && reviewMatch) {
-    const user = requireUser(req, res, 'operator');
-    if (!user) return;
-    const teamId = reviewMatch[1];
-    if (!db.teams.some((item) => item.id === teamId)) return error(res, 404, '팀을 찾을 수 없습니다.');
-    if (!isPresentationPublished(teamId)) return error(res, 400, '먼저 발표 정보를 공개해 주세요.');
-    const body = await readBody(req);
-    const scores = validateScores(body.scores || {});
-    if (!scores) return error(res, 400, '모든 평가 항목에 1~5점을 입력해 주세요.');
-    const reviewerName = cleanText(body.reviewerName, 40);
-    if (reviewerName.length < 2) return error(res, 400, '심사위원 이름을 2자 이상 입력해 주세요.');
-    const comment = cleanText(body.comment, 500);
-    if (comment.length < 3) return error(res, 400, '가장 강한 점과 보완할 점을 포함한 한 줄 평가를 입력해 주세요.');
-    const now = new Date().toISOString();
-    const reviewId = cleanText(body.reviewId, 80);
-    const existing = reviewId ? db.operatorReviews.find((item) => item.id === reviewId && item.teamId === teamId) : null;
-    if (reviewId && !existing) return error(res, 404, '수정할 심사 평가를 찾을 수 없습니다.');
-    if (existing) Object.assign(existing, { reviewerName, scores, comment, updatedAt: now });
-    else db.operatorReviews.push({ id: id('review'), teamId, userId: user.id, createdBy: user.id, reviewerName, scores, comment, createdAt: now, updatedAt: now });
-    await saveDatabase();
-    return json(res, 200, { message: `${reviewerName} 심사위원의 평가가 저장되었습니다.` });
-  }
-
-  const reviewDeleteMatch = pathname.match(/^\/api\/reviews\/([^/]+)$/);
-  if (req.method === 'DELETE' && reviewDeleteMatch) {
-    const user = requireUser(req, res, 'operator');
-    if (!user) return;
-    const index = db.operatorReviews.findIndex((item) => item.id === reviewDeleteMatch[1]);
-    if (index < 0) return error(res, 404, '심사 평가를 찾을 수 없습니다.');
-    const [review] = db.operatorReviews.splice(index, 1);
-    await saveDatabase();
-    return json(res, 200, { message: `${review.reviewerName || '심사위원'} 평가를 삭제했습니다.` });
   }
 
   const teamVoteResetMatch = pathname.match(/^\/api\/teams\/([^/]+)\/votes$/);
