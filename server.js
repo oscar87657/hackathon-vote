@@ -796,7 +796,7 @@ async function start() {
   return server;
 }
 
-if (require.main === module) start();
+if (require.main === module || process.env.VERCEL === '1') start();
 
 // Vercel의 Node server 엔트리포인트는 사용자 정의 export를 허용하지 않는다.
 // 로컬 테스트에서 불러올 때만 검증 함수를 노출한다.
