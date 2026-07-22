@@ -81,14 +81,16 @@ test('발표 공개 → 익명 참가자 투표 → 마감 흐름', async () => 
 
   let result = await request('/api/teams/team_pixel/presentation', {
     method: 'POST',
-    body: JSON.stringify({ title: '픽셀 가이드', category: 'AI', summary: '시각장애인을 위한 실시간 공간 안내 서비스입니다.' })
+    body: JSON.stringify({ title: '픽', summary: '시각장애인을 위한 실시간 공간 안내 서비스입니다.' })
   }, operatorCookie);
   assert.equal(result.response.status, 200);
   assert.equal(result.body.team.published, true);
+  assert.equal(result.body.team.presentation.title, '픽');
+  assert.equal(Object.hasOwn(result.body.team.presentation, 'category'), false);
 
   result = await request('/api/teams/team_green/presentation', {
     method: 'POST',
-    body: JSON.stringify({ title: '그린 루프', category: 'SOCIAL', summary: '지역의 다회용기를 연결하는 순환 서비스입니다.' })
+    body: JSON.stringify({ title: '그린 루프', summary: '지역의 다회용기를 연결하는 순환 서비스입니다.' })
   }, operatorCookie);
   assert.equal(result.response.status, 200);
 
@@ -226,7 +228,6 @@ test('운영자 팀 추가와 발표자료 업로드·다운로드', async () =>
     method: 'POST',
     body: JSON.stringify({
       title: '로켓 데모',
-      category: 'ETC',
       summary: '더 빠른 발표 준비를 돕는 협업 프로젝트입니다.',
       details: '발표자의 리허설을 분석하고 핵심 개선점을 제안합니다.'
     })
@@ -276,7 +277,7 @@ test('평가 전용 그룹은 발표에서 제외되고 모든 발표를 평가�
 
   result = await request(`/api/teams/${evaluatorTeamId}/presentation`, {
     method: 'POST',
-    body: JSON.stringify({ title: '발표하면 안 됨', category: 'ETC', summary: '평가 전용 그룹은 발표할 수 없습니다.' })
+    body: JSON.stringify({ title: '발표하면 안 됨', summary: '평가 전용 그룹은 발표할 수 없습니다.' })
   }, operatorCookie);
   assert.equal(result.response.status, 400);
 

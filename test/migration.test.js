@@ -105,11 +105,12 @@ test('이전 데모 관리자 비밀번호를 환경 변수 값으로 교체한�
     assert.equal((await login(server.baseUrl, 'admin1234')).status, 401);
     assert.equal((await login(server.baseUrl, replacementPassword)).status, 200);
     const migrated = JSON.parse(await fs.readFile(dataFile, 'utf8'));
-    assert.equal(migrated.event.schemaVersion, 7);
+    assert.equal(migrated.event.schemaVersion, 8);
     assert.equal(verifyPassword(replacementPassword, migrated.users[0].passwordHash), true);
     assert.equal(migrated.operatorReviews.length, 0);
     assert.equal(migrated.teams[0].evaluatorOnly, false);
     assert.equal(migrated.presentations[0].published, true);
+    assert.equal(Object.hasOwn(migrated.presentations[0], 'category'), false);
   } finally {
     server.child.kill('SIGTERM');
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -126,7 +127,7 @@ test('사용자가 변경한 관리자 비밀번호는 마이그레이션 후에
     assert.equal((await login(server.baseUrl, customPassword)).status, 200);
     assert.equal((await login(server.baseUrl, 'Ignored-Replacement-2026!')).status, 401);
     const migrated = JSON.parse(await fs.readFile(dataFile, 'utf8'));
-    assert.equal(migrated.event.schemaVersion, 7);
+    assert.equal(migrated.event.schemaVersion, 8);
     assert.equal(verifyPassword(customPassword, migrated.users[0].passwordHash), true);
   } finally {
     server.child.kill('SIGTERM');

@@ -460,7 +460,6 @@ function detailModal(team) {
     ? materialLinks(team)
     : '<div class="empty-materials">등록된 발표자료가 없습니다.</div>';
   return modalShell(`${team.name} / presentation`, presentation.title, `
-    <div class="presentation-category">${escapeHtml(presentation.category || '기타')}</div>
     <section class="presentation-detail">
       <h3>프로젝트 소개</h3>
       <p>${escapeHtml(presentation.summary)}</p>
@@ -476,8 +475,7 @@ function publishModal(team) {
   return modalShell(`${team.name} / presentation`, team.published ? '발표 정보 수정' : '발표 공개하기', `
     <form id="publish-form" data-team-id="${team.id}">
       <div class="publish-form-grid">
-        <div class="field"><label for="project-title">프로젝트명</label><input id="project-title" name="title" maxlength="80" value="${escapeHtml(presentation.title || '')}" placeholder="프로젝트 이름" required></div>
-        <div class="field"><label for="category">분야</label><select id="category" name="category"><option value="AI" ${presentation.category === 'AI' ? 'selected':''}>AI</option><option value="WEB" ${presentation.category === 'WEB' ? 'selected':''}>Web / App</option><option value="SOCIAL" ${presentation.category === 'SOCIAL' ? 'selected':''}>소셜 임팩트</option><option value="ETC" ${presentation.category === 'ETC' ? 'selected':''}>기타</option></select></div>
+        <div class="field full"><label for="project-title">프로젝트명</label><input id="project-title" name="title" maxlength="80" value="${escapeHtml(presentation.title || '')}" placeholder="프로젝트 이름" required></div>
         <div class="field full"><label for="project-summary">프로젝트 소개</label><textarea id="project-summary" name="summary" minlength="10" maxlength="500" placeholder="해결하려는 문제와 핵심 기능을 소개해 주세요." required>${escapeHtml(presentation.summary || '')}</textarea></div>
         <div class="field full"><label for="project-details">발표 내용 <span style="color:var(--muted);font-weight:400">(선택)</span></label><textarea id="project-details" name="details" maxlength="3000" placeholder="문제 정의, 해결 방법, 주요 기능, 기대 효과 등 참가자가 볼 내용을 자세히 적어 주세요.">${escapeHtml(presentation.details || '')}</textarea></div>
       </div>
@@ -556,7 +554,7 @@ async function handleModalSubmit(form, kind) {
     let payload;
     if (kind === 'publish') {
       url = `/api/teams/${teamId}/presentation`;
-      payload = { title: values.title, category: values.category, summary: values.summary, details: values.details };
+      payload = { title: values.title, summary: values.summary, details: values.details };
     } else {
       url = `/api/teams/${teamId}/${kind}`;
       payload = { scores: formScores(form), comment: values.comment };

@@ -160,7 +160,7 @@ function seedDatabase() {
       subtitle: 'Demo Day · Seoul 2026',
       votingOpen: false,
       activeTeamId: null,
-      schemaVersion: 7,
+      schemaVersion: 8,
       updatedAt: new Date().toISOString()
     },
     teams: includeDemoData ? demoTeams : [],
@@ -285,6 +285,11 @@ async function loadDatabase() {
     // 별도 심사위원 평가 기능을 제거하고 참가자 평가로 단일화한다.
     db.operatorReviews = [];
     db.event.schemaVersion = 7;
+    migrated = true;
+  }
+  if (Number(db.event.schemaVersion || 0) < 8) {
+    for (const presentation of db.presentations) delete presentation.category;
+    db.event.schemaVersion = 8;
     migrated = true;
   }
   if (stored.migrateLocalFiles) await migrateLocalMaterialFiles();
@@ -795,11 +800,15 @@ async function handleApi(req, res, pathname) {
     const title = cleanText(body.title, 80);
     const summary = cleanText(body.summary, 500);
     const details = cleanText(body.details, 3000);
-    if (title.length < 2 || summary.length < 10) return error(res, 400, '프로젝트명과 10자 이상의 소개를 입력해 주세요.');
+    if (!title || summary.length < 10) return error(res, 400, '프로젝트명과 10자 이상의 소개를 입력해 주세요.');
     const now = new Date().toISOString();
     const existing = db.presentations.find((item) => item.teamId === teamId);
-    if (existing) Object.assign(existing, { title, summary, details, category: cleanText(body.category, 30), published: true, updatedAt: now, publishedBy: user.id });
-    else db.presentations.push({ id: id('presentation'), teamId, title, summary, details, category: cleanText(body.category, 30), published: true, createdAt: now, updatedAt: now, publishedBy: user.id });
+    if (existing) {
+      Object.assign(existing, { title, summary, details, published: true, updatedAt: now, publishedBy: user.id });
+      delete existing.category;
+    } else {
+      db.presentations.push({ id: id('presentation'), teamId, title, summary, details, published: true, createdAt: now, updatedAt: now, publishedBy: user.id });
+    }
     await saveDatabase();
     return json(res, 200, { team: teamPayload(team, user, true) });
   }
