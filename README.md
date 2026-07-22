@@ -29,7 +29,18 @@ npm start
 
 첫 연결 시 Supabase에 상태가 없으면 기존 `data/database.json`과 `data/uploads`의 발표자료를 자동으로 옮깁니다. 로컬 파일은 백업으로 남겨 둡니다. Supabase 환경 변수가 없으면 기존처럼 로컬 JSON과 파일을 사용합니다.
 
-Supabase 1단계 연결은 기존 앱 구조를 유지하기 위해 하나의 JSONB 상태 레코드를 사용합니다. 따라서 운영 중에는 서버 인스턴스를 하나만 실행해야 합니다. 수평 확장이 필요하면 팀·사용자·투표를 각각의 Postgres 테이블로 분리해야 합니다.
+Supabase 1단계 연결은 기존 앱 구조를 유지하기 위해 하나의 JSONB 상태 레코드를 사용합니다. 소규모 행사와 단일 서버에 적합하며, 동시 쓰기가 많거나 서버를 수평 확장하려면 팀·사용자·투표를 각각의 Postgres 테이블로 분리해야 합니다.
+
+## Vercel 배포
+
+GitHub의 `oscar87657/hackathon-vote` 저장소를 Vercel에서 Import하고 다음 환경 변수를 Production, Preview, Development에 설정합니다.
+
+- `SUPABASE_URL`
+- `SUPABASE_SECRET_KEY`
+- `SUPABASE_STATE_TABLE` (`hackathon_state`)
+- `SUPABASE_STORAGE_BUCKET` (`presentation-materials`)
+
+서버는 Supabase Secret Key를 파생한 서명 키로 사용해 서버 재시작 후에도 로그인 쿠키를 검증합니다. Supabase를 사용하지 않는 배포라면 `SESSION_SECRET`에 안전한 랜덤 값을 별도로 설정해야 합니다. `vercel.json`은 Supabase 데이터베이스와 같은 Tokyo 리전에서 Fluid Compute를 사용하도록 설정합니다.
 
 ## 관리자 계정
 

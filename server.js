@@ -28,7 +28,7 @@ const supabase = SUPABASE_URL ? createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
 }) : null;
 
-const sessions = new Map();
+const SESSION_SECRET = process.env.SESSION_SECRET || SUPABASE_KEY || crypto.randomBytes(32).toString('hex');
 let db;
 let writeQueue = Promise.resolve();
 let generatedAdminPassword = null;
@@ -60,6 +60,45 @@ function verifyPassword(password, stored) {
   const candidate = crypto.scryptSync(password, salt, 64);
   const originalBuffer = Buffer.from(original, 'hex');
   return candidate.length === originalBuffer.length && crypto.timingSafeEqual(candidate, originalBuffer);
+}
+
+function passwordFingerprint(stored) {
+  return crypto.createHash('sha256').update(stored).digest('base64url').slice(0, 16);
+}
+
+function createSessionToken(user) {
+  const payload = Buffer.from(JSON.stringify({
+    userId: user.id,
+    password: passwordFingerprint(user.passwordHash),
+    expiresAt: Date.now() + SESSION_MAX_AGE * 1000
+  })).toString('base64url');
+  const signature = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function sessionUser(token) {
+  if (!token) return null;
+  const [payload, signature, extra] = token.split('.');
+  if (!payload || !signature || extra) return null;
+  const expected = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest();
+  const actual = Buffer.from(signature, 'base64url');
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return null;
+  try {
+    const session = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    if (!session.userId || session.expiresAt < Date.now()) return null;
+    const user = db.users.find((item) => item.id === session.userId);
+    if (!user || session.password !== passwordFingerprint(user.passwordHash)) return null;
+    return user;
+  } catch {
+    return null;
+  }
+}
+
+function sessionCookie(req, token, maxAge = SESSION_MAX_AGE) {
+  const secure = process.env.VERCEL === '1'
+    || process.env.NODE_ENV === 'production'
+    || req.headers['x-forwarded-proto'] === 'https';
+  return `session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
 }
 
 function seedDatabase() {
@@ -303,12 +342,7 @@ function cookies(req) {
 
 function currentUser(req) {
   const token = cookies(req).session;
-  const session = token && sessions.get(token);
-  if (!session || session.expiresAt < Date.now()) {
-    if (token) sessions.delete(token);
-    return null;
-  }
-  return db.users.find((user) => user.id === session.userId) || null;
+  return sessionUser(token);
 }
 
 function publicUser(user) {
@@ -401,6 +435,10 @@ function teamPayload(team, user, includeResults = false) {
 }
 
 async function handleApi(req, res, pathname) {
+  if (req.method === 'GET' && pathname === '/api/health') {
+    return json(res, 200, { ok: true, storage: supabase ? 'supabase' : 'local' });
+  }
+
   if (req.method === 'POST' && pathname === '/api/login') {
     const body = await readBody(req);
     const email = cleanText(body.email, 120).toLowerCase();
@@ -408,10 +446,9 @@ async function handleApi(req, res, pathname) {
     if (!user || !verifyPassword(String(body.password || ''), user.passwordHash)) {
       return error(res, 401, '이메일 또는 비밀번호가 올바르지 않습니다.');
     }
-    const token = crypto.randomBytes(32).toString('hex');
-    sessions.set(token, { userId: user.id, expiresAt: Date.now() + SESSION_MAX_AGE * 1000 });
+    const token = createSessionToken(user);
     return json(res, 200, { user: publicUser(user) }, {
-      'Set-Cookie': `session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_MAX_AGE}`
+      'Set-Cookie': sessionCookie(req, token)
     });
   }
 
@@ -433,9 +470,7 @@ async function handleApi(req, res, pathname) {
   }
 
   if (req.method === 'POST' && pathname === '/api/logout') {
-    const token = cookies(req).session;
-    if (token) sessions.delete(token);
-    return json(res, 200, { ok: true }, { 'Set-Cookie': 'session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+    return json(res, 200, { ok: true }, { 'Set-Cookie': sessionCookie(req, '', 0) });
   }
 
   if (req.method === 'GET' && pathname === '/api/me') {
@@ -452,12 +487,10 @@ async function handleApi(req, res, pathname) {
     if (!verifyPassword(currentPassword, user.passwordHash)) return error(res, 403, '현재 비밀번호가 올바르지 않습니다.');
     if (newPassword.length < 12) return error(res, 400, '새 비밀번호는 12자 이상이어야 합니다.');
     user.passwordHash = passwordHash(newPassword);
-    const currentToken = cookies(req).session;
-    for (const [token, session] of sessions) {
-      if (session.userId === user.id && token !== currentToken) sessions.delete(token);
-    }
     await saveDatabase();
-    return json(res, 200, { message: '비밀번호를 변경했습니다.' });
+    return json(res, 200, { message: '비밀번호를 변경했습니다.' }, {
+      'Set-Cookie': sessionCookie(req, createSessionToken(user))
+    });
   }
 
   if (req.method === 'GET' && pathname === '/api/dashboard') {
