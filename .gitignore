@@ -1,0 +1,9 @@
+data/database.json
+data/database.json.tmp
+data/uploads/
+.env
+.env.*
+!.env.example
+.DS_Store
+node_modules/
+coverage/
