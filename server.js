@@ -147,7 +147,7 @@ function seedDatabase() {
       subtitle: 'Demo Day · Seoul 2026',
       votingOpen: false,
       activeTeamId: null,
-      schemaVersion: 4,
+      schemaVersion: 5,
       updatedAt: new Date().toISOString()
     },
     teams: includeDemoData ? demoTeams : [],
@@ -246,6 +246,16 @@ async function loadDatabase() {
       if (!Object.hasOwn(presentation, 'details')) presentation.details = '';
     }
     db.event.schemaVersion = 4;
+    migrated = true;
+  }
+  if (Number(db.event.schemaVersion || 0) < 5) {
+    for (const review of db.operatorReviews) {
+      if (!review.reviewerName) {
+        review.reviewerName = db.users.find((user) => user.id === review.userId)?.name || '심사위원';
+      }
+      if (!review.createdBy) review.createdBy = review.userId || null;
+    }
+    db.event.schemaVersion = 5;
     migrated = true;
   }
   if (stored.migrateLocalFiles) await migrateLocalMaterialFiles();
@@ -467,8 +477,20 @@ function teamPayload(team, user, includeResults = false) {
     };
     payload.operatorReviews = operatorReviews.map((review) => ({
       ...review,
-      operatorName: db.users.find((item) => item.id === review.userId)?.name || '운영자'
+      reviewerName: review.reviewerName || db.users.find((item) => item.id === review.userId)?.name || '심사위원'
     }));
+    payload.participantReviews = votes.map((vote) => {
+      const participant = db.users.find((item) => item.id === vote.userId);
+      const participantTeam = db.teams.find((item) => item.id === participant?.teamId);
+      return {
+        id: vote.id,
+        participantName: participant?.name || '참가자',
+        participantTeamName: participantTeam?.name || '소속팀 없음',
+        scores: vote.scores,
+        comment: vote.comment,
+        updatedAt: vote.updatedAt
+      };
+    });
   }
   return payload;
 }
@@ -756,14 +778,51 @@ async function handleApi(req, res, pathname) {
     const body = await readBody(req);
     const scores = validateScores(body.scores || {});
     if (!scores) return error(res, 400, '모든 평가 항목에 1~5점을 입력해 주세요.');
+    const reviewerName = cleanText(body.reviewerName, 40);
+    if (reviewerName.length < 2) return error(res, 400, '심사위원 이름을 2자 이상 입력해 주세요.');
     const comment = cleanText(body.comment, 500);
     if (comment.length < 3) return error(res, 400, '가장 강한 점과 보완할 점을 포함한 한 줄 평가를 입력해 주세요.');
     const now = new Date().toISOString();
-    const existing = db.operatorReviews.find((item) => item.teamId === teamId && item.userId === user.id);
-    if (existing) Object.assign(existing, { scores, comment, updatedAt: now });
-    else db.operatorReviews.push({ id: id('review'), teamId, userId: user.id, scores, comment, createdAt: now, updatedAt: now });
+    const reviewId = cleanText(body.reviewId, 80);
+    const existing = reviewId ? db.operatorReviews.find((item) => item.id === reviewId && item.teamId === teamId) : null;
+    if (reviewId && !existing) return error(res, 404, '수정할 심사 평가를 찾을 수 없습니다.');
+    if (existing) Object.assign(existing, { reviewerName, scores, comment, updatedAt: now });
+    else db.operatorReviews.push({ id: id('review'), teamId, userId: user.id, createdBy: user.id, reviewerName, scores, comment, createdAt: now, updatedAt: now });
     await saveDatabase();
-    return json(res, 200, { message: '운영자 평가가 저장되었습니다.' });
+    return json(res, 200, { message: `${reviewerName} 심사위원의 평가가 저장되었습니다.` });
+  }
+
+  const reviewDeleteMatch = pathname.match(/^\/api\/reviews\/([^/]+)$/);
+  if (req.method === 'DELETE' && reviewDeleteMatch) {
+    const user = requireUser(req, res, 'operator');
+    if (!user) return;
+    const index = db.operatorReviews.findIndex((item) => item.id === reviewDeleteMatch[1]);
+    if (index < 0) return error(res, 404, '심사 평가를 찾을 수 없습니다.');
+    const [review] = db.operatorReviews.splice(index, 1);
+    await saveDatabase();
+    return json(res, 200, { message: `${review.reviewerName || '심사위원'} 평가를 삭제했습니다.` });
+  }
+
+  const teamVoteResetMatch = pathname.match(/^\/api\/teams\/([^/]+)\/votes$/);
+  if (req.method === 'DELETE' && teamVoteResetMatch) {
+    const user = requireUser(req, res, 'operator');
+    if (!user) return;
+    const team = db.teams.find((item) => item.id === teamVoteResetMatch[1]);
+    if (!team) return error(res, 404, '팀을 찾을 수 없습니다.');
+    const previousCount = db.votes.length;
+    db.votes = db.votes.filter((vote) => vote.teamId !== team.id);
+    const removedCount = previousCount - db.votes.length;
+    await saveDatabase();
+    return json(res, 200, { removedCount, message: `${team.name}의 참가자 투표 ${removedCount}건을 초기화했습니다.` });
+  }
+
+  if (req.method === 'DELETE' && pathname === '/api/votes') {
+    const user = requireUser(req, res, 'operator');
+    if (!user) return;
+    const removedCount = db.votes.length;
+    db.votes = [];
+    await saveDatabase();
+    return json(res, 200, { removedCount, message: `전체 참가자 투표 ${removedCount}건을 초기화했습니다.` });
   }
 
   const voteMatch = pathname.match(/^\/api\/teams\/([^/]+)\/vote$/);
@@ -779,10 +838,12 @@ async function handleApi(req, res, pathname) {
     const body = await readBody(req);
     const scores = validateScores(body.scores || {});
     if (!scores) return error(res, 400, '모든 평가 항목에 1~5점을 입력해 주세요.');
+    const comment = cleanText(body.comment, 300);
+    if (comment.length < 3) return error(res, 400, '가장 강한 점과 보완할 점을 포함한 한 줄 평가를 입력해 주세요.');
     const now = new Date().toISOString();
     const existing = db.votes.find((item) => item.teamId === teamId && item.userId === user.id);
-    if (existing) Object.assign(existing, { scores, comment: cleanText(body.comment, 300), updatedAt: now });
-    else db.votes.push({ id: id('vote'), teamId, userId: user.id, scores, comment: cleanText(body.comment, 300), createdAt: now, updatedAt: now });
+    if (existing) Object.assign(existing, { scores, comment, updatedAt: now });
+    else db.votes.push({ id: id('vote'), teamId, userId: user.id, scores, comment, createdAt: now, updatedAt: now });
     await saveDatabase();
     return json(res, 200, { message: existing ? '투표를 수정했습니다.' : '투표가 제출되었습니다.' });
   }
