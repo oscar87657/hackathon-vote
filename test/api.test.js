@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const ExcelJS = require('exceljs');
 
 let child;
 let baseUrl;
@@ -165,9 +166,25 @@ test('운영자 공개 → 운영 평가 → 참가자 투표 → 마감 흐름'
   assert.equal(result.body.attendance.notVoted.length, 2);
   pixelTeam = result.body.teams.find((team) => team.id === 'team_pixel');
   assert.equal(pixelTeam.participantReviews.length, 1);
-  assert.equal(pixelTeam.participantReviews[0].participantName, '이노바');
-  assert.equal(pixelTeam.participantReviews[0].participantTeamName, 'Team Nova');
+  assert.equal(pixelTeam.participantReviews[0].anonymousLabel, '익명 평가 01');
+  assert.equal(Object.hasOwn(pixelTeam.participantReviews[0], 'participantName'), false);
+  assert.equal(Object.hasOwn(pixelTeam.participantReviews[0], 'participantTeamName'), false);
   assert.equal(pixelTeam.participantReviews[0].comment, '응원합니다.');
+
+  const excelResponse = await fetch(`${baseUrl}/api/results/export`, { headers: { Cookie: operatorCookie } });
+  assert.equal(excelResponse.status, 200);
+  assert.match(excelResponse.headers.get('content-type'), /spreadsheetml/);
+  assert.match(excelResponse.headers.get('content-disposition'), /hackathon-results-.*\.xlsx/);
+  const excelBuffer = Buffer.from(await excelResponse.arrayBuffer());
+  assert.equal(excelBuffer.subarray(0, 2).toString(), 'PK');
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(excelBuffer);
+  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['종합 결과', '익명 참가자 평가', '심사위원 평가']);
+  const participantSheetValues = JSON.stringify(workbook.getWorksheet('익명 참가자 평가').getSheetValues());
+  assert.match(participantSheetValues, /익명 평가 01/);
+  assert.doesNotMatch(participantSheetValues, /이노바|nova@hackathon\.kr|Team Nova/);
+  const unauthorizedExcel = await fetch(`${baseUrl}/api/results/export`, { headers: { Cookie: participantCookie } });
+  assert.equal(unauthorizedExcel.status, 403);
 
   result = await request('/api/event', { method: 'PATCH', body: JSON.stringify({ votingOpen: false }) }, operatorCookie);
   assert.equal(result.response.status, 200);
@@ -258,6 +275,18 @@ test('운영자 팀 추가와 발표자료 업로드·다운로드', async () =>
   assert.equal(inline.status, 200);
   assert.match(inline.headers.get('content-disposition'), /^inline;/);
 
+  result = await request(`/api/teams/${teamId}/presentation/unpublish`, { method: 'POST' }, operatorCookie);
+  assert.equal(result.response.status, 200);
+  result = await request('/api/dashboard', {}, participantCookie);
+  const unpublishedTeam = result.body.teams.find((team) => team.id === teamId);
+  assert.equal(unpublishedTeam.published, false);
+  assert.equal(unpublishedTeam.presentation, null);
+  assert.equal(unpublishedTeam.materials.length, 0);
+  download = await fetch(`${baseUrl}/api/materials/${materialId}/download`, { headers: { Cookie: participantCookie } });
+  assert.equal(download.status, 403);
+  result = await request('/api/dashboard', {}, operatorCookie);
+  assert.equal(result.body.teams.find((team) => team.id === teamId).presentation.title, '로켓 데모');
+
   result = await request(`/api/teams/${teamId}`, { method: 'DELETE' }, operatorCookie);
   assert.equal(result.response.status, 200);
   download = await fetch(`${baseUrl}/api/materials/${materialId}/download`, { headers: { Cookie: operatorCookie } });
@@ -275,11 +304,13 @@ test('팀별·전체 참가자 투표 초기화와 권한 검사', async () => {
 
   result = await request('/api/teams/team_pixel/votes', { method: 'DELETE' }, operatorCookie);
   assert.equal(result.response.status, 200);
-  assert.equal(result.body.removedCount, 1);
+  assert.equal(result.body.removedVoteCount, 1);
+  assert.equal(result.body.removedReviewCount, 1);
+  assert.equal(result.body.removedCount, 2);
 
   result = await request('/api/dashboard', {}, operatorCookie);
   assert.equal(result.body.teams.find((team) => team.id === 'team_pixel').participantVoteCount, 0);
-  assert.equal(result.body.teams.find((team) => team.id === 'team_pixel').operatorReviewCount, 1);
+  assert.equal(result.body.teams.find((team) => team.id === 'team_pixel').operatorReviewCount, 0);
 
   result = await request('/api/teams/team_green/vote', {
     method: 'POST',
@@ -287,13 +318,21 @@ test('팀별·전체 참가자 투표 초기화와 권한 검사', async () => {
   }, participantCookie);
   assert.equal(result.response.status, 200);
 
+  result = await request('/api/teams/team_green/review', {
+    method: 'POST',
+    body: JSON.stringify({ reviewerName: '최심사', scores: validScores, comment: '기술 활용이 좋고 시장 검증을 보완해야 합니다.' })
+  }, operatorCookie);
+  assert.equal(result.response.status, 200);
+
   result = await request('/api/votes', { method: 'DELETE' }, operatorCookie);
   assert.equal(result.response.status, 200);
-  assert.equal(result.body.removedCount, 1);
+  assert.equal(result.body.removedVoteCount, 1);
+  assert.equal(result.body.removedReviewCount, 1);
+  assert.equal(result.body.removedCount, 2);
 
   result = await request('/api/dashboard', {}, operatorCookie);
   assert.equal(result.body.teams.reduce((sum, team) => sum + team.participantVoteCount, 0), 0);
-  assert.equal(result.body.teams.find((team) => team.id === 'team_pixel').operatorReviewCount, 1);
+  assert.equal(result.body.teams.reduce((sum, team) => sum + team.operatorReviewCount, 0), 0);
 });
 
 test('관리자 비밀번호 변경', async () => {

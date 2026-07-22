@@ -62,7 +62,17 @@ function legacyDatabase(adminPassword) {
       role: 'operator',
       teamId: null
     }],
-    presentations: [],
+    presentations: [{
+      id: 'presentation_legacy',
+      teamId: 'team_legacy',
+      title: '기존 발표',
+      summary: '기존에 공개되어 있던 발표입니다.',
+      details: '',
+      category: 'ETC',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      publishedBy: 'user_operator'
+    }],
     materials: [],
     operatorReviews: [{
       id: 'review_legacy',
@@ -95,7 +105,7 @@ test('이전 데모 관리자 비밀번호를 환경 변수 값으로 교체한�
     assert.equal((await login(server.baseUrl, 'admin1234')).status, 401);
     assert.equal((await login(server.baseUrl, replacementPassword)).status, 200);
     const migrated = JSON.parse(await fs.readFile(dataFile, 'utf8'));
-    assert.equal(migrated.event.schemaVersion, 5);
+    assert.equal(migrated.event.schemaVersion, 6);
     assert.equal(verifyPassword(replacementPassword, migrated.users[0].passwordHash), true);
     assert.equal(migrated.operatorReviews[0].scores.solutionOriginality, 5);
     assert.equal(migrated.operatorReviews[0].scores.feasibility, 4);
@@ -103,6 +113,7 @@ test('이전 데모 관리자 비밀번호를 환경 변수 값으로 교체한�
     assert.equal(migrated.operatorReviews[0].scores.pitchQuality, 2);
     assert.equal(migrated.operatorReviews[0].comment, '기존 심사 의견');
     assert.equal(migrated.operatorReviews[0].reviewerName, '관리자');
+    assert.equal(migrated.presentations[0].published, true);
   } finally {
     server.child.kill('SIGTERM');
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -119,7 +130,7 @@ test('사용자가 변경한 관리자 비밀번호는 마이그레이션 후에
     assert.equal((await login(server.baseUrl, customPassword)).status, 200);
     assert.equal((await login(server.baseUrl, 'Ignored-Replacement-2026!')).status, 401);
     const migrated = JSON.parse(await fs.readFile(dataFile, 'utf8'));
-    assert.equal(migrated.event.schemaVersion, 5);
+    assert.equal(migrated.event.schemaVersion, 6);
     assert.equal(verifyPassword(customPassword, migrated.users[0].passwordHash), true);
   } finally {
     server.child.kill('SIGTERM');

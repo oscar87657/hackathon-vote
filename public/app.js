@@ -250,6 +250,7 @@ function operatorDashboard() {
   const hasNextTeam = currentPublishedIndex < 0 ? publishedInOrder.length > 0 : currentPublishedIndex < publishedInOrder.length - 1;
   const totalVotes = teams.reduce((sum, team) => sum + team.participantVoteCount, 0);
   const reviewCount = teams.reduce((sum, team) => sum + team.operatorReviewCount, 0);
+  const totalEvaluations = totalVotes + reviewCount;
   return `<main class="page">
     ${pageHeading(`${event.title} / control room`, '운영 대시보드', '●')}
     <section class="operator-strip">
@@ -261,7 +262,7 @@ function operatorDashboard() {
     ${operatorAttendance(attendance)}
     <div class="section-title">
       <div><h2>발표 운영</h2><p>발표 정보를 공개한 뒤 한 팀을 투표 대상으로 지정하세요.</p></div>
-      <div class="admin-toolbar"><button class="primary-btn" data-action="add-team">+ 팀 추가</button><button class="secondary-btn" data-action="next-team" ${hasNextTeam ? '' : 'disabled'}>다음 팀 투표 ${icon('arrow')}</button><button class="danger-outline-btn" data-action="reset-all-votes" ${totalVotes ? '' : 'disabled'}>전체 투표 초기화</button><span class="status-chip">투표 ${event.votingOpen ? '진행' : '마감'}</span><button class="switch ${event.votingOpen ? 'on' : ''}" data-action="toggle-voting" aria-label="투표 상태 변경" ${event.activeTeamId ? '' : 'disabled'}><span></span></button></div>
+      <div class="admin-toolbar"><button class="primary-btn" data-action="add-team">+ 팀 추가</button><button class="secondary-btn" data-action="next-team" ${hasNextTeam ? '' : 'disabled'}>다음 팀 투표 ${icon('arrow')}</button><a class="secondary-btn" href="/api/results/export">결과 Excel ↓</a><button class="danger-outline-btn" data-action="reset-all-votes" ${totalEvaluations ? '' : 'disabled'}>전체 평가 초기화</button><span class="status-chip">투표 ${event.votingOpen ? '진행' : '마감'}</span><button class="switch ${event.votingOpen ? 'on' : ''}" data-action="toggle-voting" aria-label="투표 상태 변경" ${event.activeTeamId ? '' : 'disabled'}><span></span></button></div>
     </div>
     <section class="team-grid">${teams.map(operatorTeamCard).join('')}</section>
     <div class="section-title" style="margin-top:48px"><div><h2>실시간 순위</h2><p>참가자 60% + 심사위원 40% 기준입니다.</p></div><p>5점 만점</p></div>
@@ -295,6 +296,7 @@ function operatorAttendance(attendance) {
 
 function operatorTeamCard(team) {
   const reviewerNames = (team.operatorReviews || []).map((review) => review.reviewerName).join(', ');
+  const evaluationCount = team.participantVoteCount + team.operatorReviewCount;
   return `<article class="team-card ${team.isActive ? 'active-team' : ''}" style="--team-color:${team.color}">
     <div class="team-meta"><span class="team-number">TEAM / ${String(team.order).padStart(2, '0')}</span><span class="mini-state ${team.isActive || team.published ? 'done' : ''}">${team.isActive ? '현재 투표 팀' : team.published ? '공개됨' : '준비 중'}</span></div>
     <h3>${escapeHtml(team.name)}</h3>
@@ -309,7 +311,8 @@ function operatorTeamCard(team) {
       ${team.published ? `<button class="secondary-btn" data-action="result" data-id="${team.id}">${icon('chart')} 결과·의견</button>` : ''}
     </div>
     ${team.published ? `<div class="team-actions voting-action"><button class="${team.isActive ? 'secondary-btn' : 'primary-btn accent'}" data-action="activate-team" data-id="${team.id}" ${team.isActive ? 'disabled' : ''}>${team.isActive ? `${icon('check')} 현재 투표 진행 팀` : `이 팀 투표 시작 ${icon('arrow')}`}</button></div>` : ''}
-    ${team.participantVoteCount ? `<button class="reset-team-votes" data-action="reset-team-votes" data-id="${team.id}">이 팀 투표 ${team.participantVoteCount}건 초기화</button>` : ''}
+    ${team.published ? `<button class="reset-team-votes" data-action="unpublish" data-id="${team.id}">발표 공개 전으로 돌리기</button>` : ''}
+    ${evaluationCount ? `<button class="reset-team-votes" data-action="reset-team-votes" data-id="${team.id}">이 팀 점수·코멘트 ${evaluationCount}건 초기화</button>` : ''}
     <button class="danger-btn" data-action="delete-team" data-id="${team.id}">팀 삭제</button>
   </article>`;
 }
@@ -498,21 +501,21 @@ function resultModal(team) {
   const detail = scoreMeta.map(([key, label]) => `<div><span>${label}</span><strong>참가자 ${participant[key].toFixed(1)} · 심사위원 ${operator[key].toFixed(1)}</strong></div>`).join('');
   const participantReviews = team.participantReviews?.length
     ? team.participantReviews.map((review) => individualReview(review, 'participant')).join('')
-    : '<div class="empty-state compact"><strong>아직 참가자 심사가 없습니다.</strong>참가자가 투표하면 이름별 점수와 의견이 표시됩니다.</div>';
+    : '<div class="empty-state compact"><strong>아직 참가자 심사가 없습니다.</strong>참가자가 투표하면 익명 점수와 의견이 표시됩니다.</div>';
   const juryReviews = team.operatorReviews?.length
     ? team.operatorReviews.map((review) => individualReview(review, 'jury', team.id)).join('')
     : '<div class="empty-state compact"><strong>등록된 심사위원 평가가 없습니다.</strong>심사위원별 평가를 추가해 주세요.</div>';
   return modalShell(`${team.name} / live result`, '평가 결과', `
     <div class="result-box"><div class="result-total">${team.results.combined.toFixed(2)}</div><div class="result-lines">${detail}<div><span>참여</span><strong>참가자 ${team.participantVoteCount}명 · 심사위원 ${team.operatorReviewCount}명</strong></div></div></div>
-    <div class="section-title review-section-title"><div><h2>참가자별 심사</h2><p>각 참가자가 제출한 점수와 한 줄 평가입니다.</p></div></div>
+    <div class="section-title review-section-title"><div><h2>익명 참가자 심사</h2><p>작성자를 식별할 수 없도록 이름과 소속팀을 숨겼습니다.</p></div></div>
     <div class="individual-review-list">${participantReviews}</div>
     <div class="section-title review-section-title"><div><h2>심사위원별 평가</h2><p>관리자가 등록한 심사위원별 결과입니다.</p></div><button class="secondary-btn small-btn" data-action="review" data-id="${team.id}">+ 심사 추가</button></div>
     <div class="individual-review-list">${juryReviews}</div>`);
 }
 
 function individualReview(review, type, teamId = '') {
-  const name = type === 'participant' ? review.participantName : review.reviewerName;
-  const affiliation = type === 'participant' ? review.participantTeamName : '심사위원';
+  const name = type === 'participant' ? review.anonymousLabel : review.reviewerName;
+  const affiliation = type === 'participant' ? '작성자 정보 비공개' : '심사위원';
   const scoreDetail = scoreMeta.map(([key, label]) => `<li><span>${escapeHtml(label.replace(/^Q\d+\.\s*/, ''))}</span><strong>${Number(review.scores[key] || 0)}점</strong></li>`).join('');
   const actions = type === 'jury' ? `<div class="individual-review-actions"><button data-action="edit-review" data-id="${teamId}" data-review-id="${review.id}">수정</button><button class="danger-text" data-action="delete-review" data-id="${teamId}" data-review-id="${review.id}">삭제</button></div>` : '';
   return `<article class="individual-review">
@@ -746,7 +749,8 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'reset-team-votes') {
     const team = state.dashboard.teams.find((item) => item.id === target.dataset.id);
-    if (!team || !window.confirm(`${team.name}에 제출된 참가자 투표 ${team.participantVoteCount}건을 모두 초기화할까요?\n\n심사위원 평가는 유지되며, 초기화한 투표는 복구할 수 없습니다.`)) return;
+    const evaluationCount = (team?.participantVoteCount || 0) + (team?.operatorReviewCount || 0);
+    if (!team || !window.confirm(`${team.name}의 참가자 투표와 심사위원 평가 ${evaluationCount}건을 모두 초기화할까요?\n\n모든 점수와 코멘트가 삭제되며 복구할 수 없습니다.`)) return;
     target.disabled = true;
     try {
       const result = await api(`/api/teams/${team.id}/votes`, { method: 'DELETE' });
@@ -759,10 +763,25 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'reset-all-votes') {
     const totalVotes = state.dashboard.teams.reduce((sum, team) => sum + team.participantVoteCount, 0);
-    if (!totalVotes || !window.confirm(`전체 팀에 제출된 참가자 투표 ${totalVotes}건을 모두 초기화할까요?\n\n심사위원 평가는 유지되며, 초기화한 투표는 복구할 수 없습니다.`)) return;
+    const totalReviews = state.dashboard.teams.reduce((sum, team) => sum + team.operatorReviewCount, 0);
+    const evaluationCount = totalVotes + totalReviews;
+    if (!evaluationCount || !window.confirm(`전체 팀의 참가자 투표와 심사위원 평가 ${evaluationCount}건을 모두 초기화할까요?\n\n모든 점수와 코멘트가 삭제되며 복구할 수 없습니다.`)) return;
     target.disabled = true;
     try {
       const result = await api('/api/votes', { method: 'DELETE' });
+      toast(result.message);
+      await loadDashboard();
+    } catch (error) {
+      target.disabled = false;
+      toast(error.message, 'error');
+    }
+  }
+  if (action === 'unpublish') {
+    const team = state.dashboard.teams.find((item) => item.id === target.dataset.id);
+    if (!team || !window.confirm(`${team.name} 발표를 공개 전 상태로 돌릴까요?\n\n발표 내용과 자료, 평가 기록은 보존됩니다. 현재 투표 팀이라면 투표도 마감됩니다.`)) return;
+    target.disabled = true;
+    try {
+      const result = await api(`/api/teams/${team.id}/presentation/unpublish`, { method: 'POST' });
       toast(result.message);
       await loadDashboard();
     } catch (error) {
