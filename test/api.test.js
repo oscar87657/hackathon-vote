@@ -279,6 +279,8 @@ test('운영자 팀 추가와 발표자료 업로드·다운로드', async () =>
   assert.match(inline.headers.get('content-disposition'), /^inline;/);
 
   result = await request(`/api/teams/${teamId}/presentation/unpublish`, { method: 'POST' }, rocketCookie);
+  assert.equal(result.response.status, 403);
+  result = await request(`/api/teams/${teamId}/presentation/unpublish`, { method: 'POST' }, operatorCookie);
   assert.equal(result.response.status, 200);
   result = await request('/api/dashboard', {}, participantCookie);
   const unpublishedTeam = result.body.teams.find((team) => team.id === teamId);
@@ -298,6 +300,59 @@ test('운영자 팀 추가와 발표자료 업로드·다운로드', async () =>
   assert.equal(download.status, 404);
   result = await request('/api/dashboard', {}, operatorCookie);
   assert.equal(result.body.teams.some((team) => team.id === teamId), false);
+});
+
+test('관리자가 참가자 정보를 수정하고 계정을 삭제할 수 있다', async () => {
+  const operatorCookie = await login('admin@hackathon.kr', 'admin1234');
+  let result = await request('/api/register', {
+    method: 'POST',
+    body: JSON.stringify({ name: '관리대상', email: 'managed@example.com', password: 'password123', teamCode: 'NOVA26' })
+  });
+  assert.equal(result.response.status, 201);
+  const participantCookie = await login('managed@example.com', 'password123');
+
+  result = await request('/api/users', {}, participantCookie);
+  assert.equal(result.response.status, 403);
+
+  result = await request('/api/users', {}, operatorCookie);
+  assert.equal(result.response.status, 200);
+  const managedUser = result.body.users.find((user) => user.email === 'managed@example.com');
+  assert.ok(managedUser);
+  assert.equal(managedUser.teamName, 'Team Nova');
+  assert.equal(Object.hasOwn(managedUser, 'passwordHash'), false);
+
+  result = await request(`/api/users/${managedUser.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({
+      name: '수정된참가자',
+      email: 'managed-updated@example.com',
+      teamId: 'team_green',
+      newPassword: 'updated-password-2026'
+    })
+  }, operatorCookie);
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.user.name, '수정된참가자');
+  assert.equal(result.body.user.teamName, 'Green Loop');
+
+  result = await request('/api/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'managed@example.com', password: 'password123' })
+  });
+  assert.equal(result.response.status, 401);
+  await login('managed-updated@example.com', 'updated-password-2026');
+
+  result = await request('/api/users/user_operator', {
+    method: 'DELETE'
+  }, operatorCookie);
+  assert.equal(result.response.status, 404);
+
+  result = await request(`/api/users/${managedUser.id}`, { method: 'DELETE' }, operatorCookie);
+  assert.equal(result.response.status, 200);
+  result = await request('/api/login', {
+    method: 'POST',
+    body: JSON.stringify({ email: 'managed-updated@example.com', password: 'updated-password-2026' })
+  });
+  assert.equal(result.response.status, 401);
 });
 
 test('평가 전용 그룹은 발표에서 제외되고 모든 발표를 평가할 수 있다', async () => {

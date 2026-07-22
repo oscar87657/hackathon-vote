@@ -706,6 +706,61 @@ async function handleApi(req, res, pathname) {
     });
   }
 
+  if (req.method === 'GET' && pathname === '/api/users') {
+    const user = requireUser(req, res, 'operator');
+    if (!user) return;
+    const teamOrder = new Map(db.teams.map((team) => [team.id, team.order]));
+    const users = db.users
+      .filter((item) => item.role === 'participant')
+      .slice()
+      .sort((a, b) => (teamOrder.get(a.teamId) || 0) - (teamOrder.get(b.teamId) || 0)
+        || a.name.localeCompare(b.name, 'ko'))
+      .map(publicUser);
+    return json(res, 200, { users });
+  }
+
+  const managedUserMatch = pathname.match(/^\/api\/users\/([^/]+)$/);
+  if (req.method === 'PATCH' && managedUserMatch) {
+    const user = requireUser(req, res, 'operator');
+    if (!user) return;
+    const target = db.users.find((item) => item.id === managedUserMatch[1] && item.role === 'participant');
+    if (!target) return error(res, 404, '수정할 참가자를 찾을 수 없습니다.');
+    const body = await readBody(req);
+    const name = cleanText(body.name, 30);
+    const email = cleanText(body.email, 120).toLowerCase();
+    const teamId = cleanText(body.teamId, 80);
+    const newPassword = String(body.newPassword || '');
+    if (name.length < 2) return error(res, 400, '이름을 2자 이상 입력해 주세요.');
+    if (!/^\S+@\S+\.\S+$/.test(email)) return error(res, 400, '올바른 이메일을 입력해 주세요.');
+    if (db.users.some((item) => item.id !== target.id && item.email.toLowerCase() === email)) {
+      return error(res, 409, '이미 가입된 이메일입니다.');
+    }
+    if (!db.teams.some((team) => team.id === teamId)) return error(res, 400, '소속 팀을 선택해 주세요.');
+    if (newPassword && newPassword.length < 8) return error(res, 400, '임시 비밀번호는 8자 이상이어야 합니다.');
+    Object.assign(target, { name, email, teamId });
+    db.votes = db.votes.filter((vote) => vote.userId !== target.id || vote.teamId !== teamId);
+    if (newPassword) target.passwordHash = passwordHash(newPassword);
+    await saveDatabase();
+    return json(res, 200, { user: publicUser(target), message: `${name} 참가자 정보를 수정했습니다.` });
+  }
+
+  if (req.method === 'DELETE' && managedUserMatch) {
+    const user = requireUser(req, res, 'operator');
+    if (!user) return;
+    const target = db.users.find((item) => item.id === managedUserMatch[1] && item.role === 'participant');
+    if (!target) return error(res, 404, '삭제할 참가자를 찾을 수 없습니다.');
+    const removedVoteCount = db.votes.filter((vote) => vote.userId === target.id).length;
+    const removedReviewCount = db.operatorReviews.filter((review) => review.userId === target.id).length;
+    db.users = db.users.filter((item) => item.id !== target.id);
+    db.votes = db.votes.filter((vote) => vote.userId !== target.id);
+    db.operatorReviews = db.operatorReviews.filter((review) => review.userId !== target.id);
+    await saveDatabase();
+    return json(res, 200, {
+      removedEvaluationCount: removedVoteCount + removedReviewCount,
+      message: `${target.name} 참가자 계정과 작성한 평가를 삭제했습니다.`
+    });
+  }
+
   if (req.method === 'GET' && pathname === '/api/results/export') {
     const user = requireUser(req, res, 'operator');
     if (!user) return;
@@ -836,11 +891,10 @@ async function handleApi(req, res, pathname) {
 
   const presentationUnpublishMatch = pathname.match(/^\/api\/teams\/([^/]+)\/presentation\/unpublish$/);
   if (req.method === 'POST' && presentationUnpublishMatch) {
-    const user = requireUser(req, res);
+    const user = requireUser(req, res, 'operator');
     if (!user) return;
     const team = db.teams.find((item) => item.id === presentationUnpublishMatch[1]);
     if (!team) return error(res, 404, '팀을 찾을 수 없습니다.');
-    if (!canManageTeam(user, team.id)) return error(res, 403, '관리자 또는 해당 팀 소속만 발표를 초기화할 수 있습니다.');
     const presentationIndex = db.presentations.findIndex((item) => item.teamId === team.id && item.published !== false);
     if (presentationIndex < 0) return error(res, 400, '이미 발표 공개 전 상태입니다.');
     db.presentations.splice(presentationIndex, 1);

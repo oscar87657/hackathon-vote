@@ -5,6 +5,7 @@ const SESSION_KEY = 'hackathon-stage-session';
 const state = {
   user: null,
   dashboard: null,
+  managedUsers: [],
   authMode: 'login',
   modal: null,
   refreshTimer: null
@@ -242,7 +243,7 @@ function participantTeamCard(team) {
     <h3>${escapeHtml(team.name)}</h3>
     ${team.presentation ? `<div class="project-name">${escapeHtml(team.presentation.title)}</div><p>${escapeHtml(team.presentation.summary)}</p>` : `<p>${team.isOwnTeam ? '내 팀의 프로젝트명과 소개를 등록해 발표를 준비하세요.' : '해당 팀이나 운영자가 발표 정보를 공개하면 프로젝트 소개가 표시됩니다.'}</p>`}
     ${team.published ? `<div class="team-actions participant-detail-action"><button class="secondary-btn" data-action="detail" data-id="${team.id}">발표 내용 · 자료 보기 ${icon('arrow')}</button></div>` : ''}
-    ${team.isOwnTeam ? `<div class="team-actions own-team-actions"><button class="primary-btn" data-action="publish" data-id="${team.id}">${team.published ? '내 팀 발표 수정' : '내 팀 발표 등록'}</button><button class="secondary-btn" data-action="materials" data-id="${team.id}">자료 관리</button></div>${team.published ? `<button class="reset-team-votes" data-action="unpublish" data-id="${team.id}">발표 정보 초기화</button>` : ''}` : ''}
+    ${team.isOwnTeam ? `<div class="team-actions own-team-actions"><button class="primary-btn" data-action="publish" data-id="${team.id}">${team.published ? '내 팀 발표 수정' : '내 팀 발표 등록'}</button><button class="secondary-btn" data-action="materials" data-id="${team.id}">자료 관리</button></div>` : ''}
     ${locked
       ? `<div class="locked-message"><span class="lock-icon">${icon('lock')}</span>${lockedMessage}</div>`
       : `<div class="team-actions"><button class="${team.myVote ? 'secondary-btn' : 'primary-btn'}" data-action="vote" data-id="${team.id}">${team.myVote ? `${icon('edit')} 평가 수정` : `평가하기 ${icon('arrow')}`}</button></div>`}
@@ -267,7 +268,7 @@ function operatorDashboard() {
     ${operatorAttendance(attendance)}
     <div class="section-title">
       <div><h2>발표 운영</h2><p>발표 정보를 공개한 뒤 한 팀을 투표 대상으로 지정하세요.</p></div>
-      <div class="admin-toolbar"><button class="primary-btn" data-action="add-team">+ 팀 추가</button><button class="secondary-btn" data-action="next-team" ${hasNextTeam ? '' : 'disabled'}>다음 팀 투표 ${icon('arrow')}</button><button class="secondary-btn" data-action="export-results">결과 Excel ↓</button><button class="danger-outline-btn" data-action="reset-all-votes" ${totalVotes ? '' : 'disabled'}>전체 평가 초기화</button><span class="status-chip">투표 ${event.votingOpen ? '진행' : '마감'}</span><button class="switch ${event.votingOpen ? 'on' : ''}" data-action="toggle-voting" aria-label="투표 상태 변경" ${event.activeTeamId ? '' : 'disabled'}><span></span></button></div>
+      <div class="admin-toolbar"><button class="primary-btn" data-action="add-team">+ 팀 추가</button><button class="secondary-btn" data-action="manage-users">이용자 관리</button><button class="secondary-btn" data-action="next-team" ${hasNextTeam ? '' : 'disabled'}>다음 팀 투표 ${icon('arrow')}</button><button class="secondary-btn" data-action="export-results">결과 Excel ↓</button><button class="danger-outline-btn" data-action="reset-all-votes" ${totalVotes ? '' : 'disabled'}>전체 평가 초기화</button><span class="status-chip">투표 ${event.votingOpen ? '진행' : '마감'}</span><button class="switch ${event.votingOpen ? 'on' : ''}" data-action="toggle-voting" aria-label="투표 상태 변경" ${event.activeTeamId ? '' : 'disabled'}><span></span></button></div>
     </div>
     <section class="team-grid">${teams.map(operatorTeamCard).join('')}</section>
     <div class="section-title" style="margin-top:48px"><div><h2>실시간 순위</h2><p>익명 참가자 평가 평균 기준입니다.</p></div><p>5점 만점</p></div>
@@ -416,6 +417,45 @@ function teamModal() {
       <label class="option-toggle"><input type="checkbox" name="evaluatorOnly"><span><strong>평가단으로 참여</strong><small>선생님·대학생처럼 발표 없이 심사에만 참여하며 발표 순서와 순위에서 제외됩니다.</small></span></label>
       <div class="form-error" id="modal-error"></div>
       <div class="modal-actions"><button type="button" class="secondary-btn" data-action="close-modal">취소</button><button type="submit" class="primary-btn lime">팀 추가 ${icon('arrow')}</button></div>
+    </form>`);
+}
+
+async function openUserManagement() {
+  const result = await api('/api/users');
+  state.managedUsers = result.users;
+  const root = document.querySelector('#modal-root');
+  root.innerHTML = usersModal(result.users);
+  document.body.style.overflow = 'hidden';
+}
+
+function usersModal(users) {
+  const list = users.length ? users.map((user) => `
+    <div class="user-manage-row">
+      <span class="avatar small">${escapeHtml(user.name.slice(0, 1))}</span>
+      <div class="user-manage-copy"><strong>${escapeHtml(user.name)}</strong><small>${escapeHtml(user.email)}</small></div>
+      <span class="user-team-chip">${escapeHtml(user.teamName || '소속 없음')}</span>
+      <div class="user-manage-actions">
+        <button class="secondary-btn small-btn" type="button" data-action="edit-user" data-id="${user.id}">수정</button>
+        <button class="danger-text-btn" type="button" data-action="delete-user" data-id="${user.id}">삭제</button>
+      </div>
+    </div>`).join('') : '<div class="empty-materials">가입한 참가자가 없습니다.</div>';
+  return modalShell('Participant management', '이용자 관리', `
+    <div class="project-brief"><strong>참가자 ${users.length}명</strong>이름·이메일·소속 팀을 수정하거나 임시 비밀번호를 설정할 수 있습니다. 계정을 삭제하면 해당 참가자가 작성한 점수와 코멘트도 함께 삭제됩니다.</div>
+    <div class="user-manage-list">${list}</div>
+    <div class="modal-actions"><button type="button" class="secondary-btn" data-action="close-modal">닫기</button></div>`);
+}
+
+function editUserModal(user) {
+  const teamOptions = state.dashboard.teams.map((team) => `
+    <option value="${team.id}" ${team.id === user.teamId ? 'selected' : ''}>${escapeHtml(team.name)}${team.evaluatorOnly ? ' · 평가단' : ''}</option>`).join('');
+  return modalShell('Participant management', '이용자 정보 수정', `
+    <form id="user-form" data-user-id="${user.id}">
+      <div class="field"><label for="managed-user-name">이름</label><input id="managed-user-name" name="name" maxlength="30" value="${escapeHtml(user.name)}" required></div>
+      <div class="field"><label for="managed-user-email">이메일</label><input id="managed-user-email" name="email" type="email" maxlength="120" value="${escapeHtml(user.email)}" required></div>
+      <div class="field"><label for="managed-user-team">소속 팀</label><select id="managed-user-team" name="teamId" required>${teamOptions}</select></div>
+      <div class="field"><label for="managed-user-password">새 임시 비밀번호 <span style="color:var(--muted);font-weight:400">(선택)</span></label><input id="managed-user-password" name="newPassword" type="password" minlength="8" autocomplete="new-password" placeholder="변경할 때만 8자 이상 입력"><span class="field-hint">입력하지 않으면 기존 비밀번호가 유지됩니다.</span></div>
+      <div class="form-error" id="modal-error"></div>
+      <div class="modal-actions"><button type="button" class="secondary-btn" data-action="back-to-users">목록으로</button><button type="submit" class="primary-btn">수정 저장 ${icon('arrow')}</button></div>
     </form>`);
 }
 
@@ -593,6 +633,25 @@ async function handleTeamSubmit(form) {
   }
 }
 
+async function handleUserSubmit(form) {
+  const button = form.querySelector('[type="submit"]');
+  const errorElement = form.querySelector('.form-error');
+  const values = Object.fromEntries(new FormData(form));
+  setButtonLoading(button, true, '저장 중');
+  try {
+    const result = await api(`/api/users/${form.dataset.userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(values)
+    });
+    toast(result.message);
+    await loadDashboard();
+    await openUserManagement();
+  } catch (error) {
+    errorElement.textContent = error.message;
+    setButtonLoading(button, false);
+  }
+}
+
 async function handlePasswordSubmit(form) {
   const button = form.querySelector('[type="submit"]');
   const errorElement = form.querySelector('.form-error');
@@ -711,6 +770,40 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'account') openModal('account');
   if (action === 'add-team') openModal('add-team');
+  if (action === 'manage-users') {
+    target.disabled = true;
+    try {
+      await openUserManagement();
+    } catch (error) {
+      target.disabled = false;
+      toast(error.message, 'error');
+    }
+  }
+  if (action === 'edit-user') {
+    const user = state.managedUsers.find((item) => item.id === target.dataset.id);
+    if (user) document.querySelector('#modal-root').innerHTML = editUserModal(user);
+  }
+  if (action === 'back-to-users') {
+    try {
+      await openUserManagement();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  }
+  if (action === 'delete-user') {
+    const user = state.managedUsers.find((item) => item.id === target.dataset.id);
+    if (!user || !window.confirm(`${user.name} 참가자 계정을 삭제할까요?\n\n이 참가자가 작성한 모든 점수와 코멘트도 삭제되며 복구할 수 없습니다.`)) return;
+    target.disabled = true;
+    try {
+      const result = await api(`/api/users/${user.id}`, { method: 'DELETE' });
+      toast(result.message);
+      await loadDashboard();
+      await openUserManagement();
+    } catch (error) {
+      target.disabled = false;
+      toast(error.message, 'error');
+    }
+  }
   if (['vote', 'publish', 'materials', 'result', 'detail'].includes(action)) openModal(action, target.dataset.id);
   if (action === 'close-modal') closeModal();
   if (action === 'backdrop' && event.target === target) closeModal();
@@ -872,6 +965,7 @@ document.addEventListener('submit', (event) => {
   if (event.target.id === 'vote-form') handleModalSubmit(event.target, 'vote');
   if (event.target.id === 'publish-form') handleModalSubmit(event.target, 'publish');
   if (event.target.id === 'team-form') handleTeamSubmit(event.target);
+  if (event.target.id === 'user-form') handleUserSubmit(event.target);
   if (event.target.id === 'password-form') handlePasswordSubmit(event.target);
   if (event.target.id === 'material-form') handleMaterialSubmit(event.target);
 });
