@@ -798,4 +798,8 @@ async function start() {
 
 if (require.main === module) start();
 
-module.exports = { createServer, loadDatabase, passwordHash, verifyPassword };
+// Vercel의 Node server 엔트리포인트는 사용자 정의 export를 허용하지 않는다.
+// 로컬 테스트에서 불러올 때만 검증 함수를 노출한다.
+if (!process.env.VERCEL) {
+  module.exports = { createServer, loadDatabase, passwordHash, verifyPassword };
+}
