@@ -800,6 +800,24 @@ async function handleApi(req, res, pathname) {
     return json(res, 201, { team: teamPayload(team, user, true), message: `${name} 팀을 추가했습니다.` });
   }
 
+  const teamCodeMatch = pathname.match(/^\/api\/teams\/([^/]+)\/code$/);
+  if (req.method === 'PATCH' && teamCodeMatch) {
+    const user = requireUser(req, res, 'operator');
+    if (!user) return;
+    const team = db.teams.find((item) => item.id === teamCodeMatch[1]);
+    if (!team) return error(res, 404, '팀을 찾을 수 없습니다.');
+    const body = await readBody(req);
+    const code = cleanText(body.code, 20).toUpperCase();
+    if (!/^[A-Z0-9-]{4,20}$/.test(code)) return error(res, 400, '참가 코드는 영문 대문자, 숫자, 하이픈으로 4~20자여야 합니다.');
+    if (db.teams.some((item) => item.id !== team.id && item.code.toUpperCase() === code)) {
+      return error(res, 409, '이미 사용 중인 참가 코드입니다.');
+    }
+    team.code = code;
+    db.event.updatedAt = new Date().toISOString();
+    await saveDatabase();
+    return json(res, 200, { team: teamPayload(team, user, true), message: `${team.name} 참가 코드를 ${code}(으)로 변경했습니다.` });
+  }
+
   const teamDeleteMatch = pathname.match(/^\/api\/teams\/([^/]+)$/);
   if (req.method === 'DELETE' && teamDeleteMatch) {
     const user = requireUser(req, res, 'operator');

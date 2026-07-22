@@ -266,10 +266,24 @@ function operatorDashboard() {
       <div class="metric"><small>평가단 인원</small><strong>${stats.evaluatorParticipants}<em> 명</em></strong></div>
     </section>
     ${operatorAttendance(attendance)}
-    <div class="section-title">
+    <div class="section-title admin-section-title">
       <div><h2>발표 운영</h2><p>발표 정보를 공개한 뒤 한 팀을 투표 대상으로 지정하세요.</p></div>
-      <div class="admin-toolbar"><button class="primary-btn" data-action="add-team">+ 팀 추가</button><button class="secondary-btn" data-action="manage-users">이용자 관리</button><button class="secondary-btn" data-action="next-team" ${hasNextTeam ? '' : 'disabled'}>다음 팀 투표 ${icon('arrow')}</button><button class="secondary-btn" data-action="export-results">결과 Excel ↓</button><button class="danger-outline-btn" data-action="reset-all-votes" ${totalVotes ? '' : 'disabled'}>전체 평가 초기화</button><span class="status-chip">투표 ${event.votingOpen ? '진행' : '마감'}</span><button class="switch ${event.votingOpen ? 'on' : ''}" data-action="toggle-voting" aria-label="투표 상태 변경" ${event.activeTeamId ? '' : 'disabled'}><span></span></button></div>
     </div>
+    <section class="admin-control-panel">
+      <div class="admin-control-group">
+        <div class="admin-control-copy"><small>MANAGEMENT</small><strong>팀 · 이용자 관리</strong><span>참여 그룹과 계정을 설정합니다.</span></div>
+        <div class="admin-control-actions"><button class="primary-btn" data-action="add-team">+ 팀 추가</button><button class="secondary-btn" data-action="manage-users">이용자 관리</button></div>
+      </div>
+      <div class="admin-control-group featured">
+        <div class="admin-control-copy"><small>LIVE CONTROL</small><strong>발표 진행</strong><span>다음 팀으로 이동하거나 투표를 여닫습니다.</span></div>
+        <button class="primary-btn accent control-wide" data-action="next-team" ${hasNextTeam ? '' : 'disabled'}>다음 팀 투표 ${icon('arrow')}</button>
+        <div class="voting-toggle-control"><div><small>현재 투표</small><strong>${event.votingOpen ? '진행 중' : '마감'}</strong></div><button class="switch ${event.votingOpen ? 'on' : ''}" data-action="toggle-voting" aria-label="투표 상태 변경" ${event.activeTeamId ? '' : 'disabled'}><span></span></button></div>
+      </div>
+      <div class="admin-control-group">
+        <div class="admin-control-copy"><small>DATA</small><strong>결과 · 초기화</strong><span>결과를 보관하거나 평가 기록을 정리합니다.</span></div>
+        <div class="admin-control-actions vertical"><button class="secondary-btn" data-action="export-results">결과 Excel ↓</button><button class="danger-outline-btn" data-action="reset-all-votes" ${totalVotes ? '' : 'disabled'}>전체 평가 초기화</button></div>
+      </div>
+    </section>
     <section class="team-grid">${teams.map(operatorTeamCard).join('')}</section>
     <div class="section-title" style="margin-top:48px"><div><h2>실시간 순위</h2><p>익명 참가자 평가 평균 기준입니다.</p></div><p>5점 만점</p></div>
     ${ranked.length ? `<section class="ranking">${ranked.map((team, index) => rankRow(team, index)).join('')}</section>` : '<div class="empty-state"><strong>아직 공개된 발표가 없습니다.</strong>발표 정보를 공개하면 집계 결과가 여기에 표시됩니다.</div>'}
@@ -305,7 +319,7 @@ function operatorTeamCard(team) {
     return `<article class="team-card evaluator-team-card" style="--team-color:${team.color}">
       <div class="team-meta"><span class="team-number">REVIEW PANEL</span><span class="mini-state own">평가단</span></div>
       <h3>${escapeHtml(team.name)}</h3>
-      <button class="team-code" data-action="copy-team-code" data-id="${team.id}" title="참가 코드 복사"><span>JOIN CODE</span><strong>${escapeHtml(team.code)}</strong>${icon('copy')}</button>
+      <div class="team-code-tools"><button class="team-code" data-action="copy-team-code" data-id="${team.id}" title="참가 코드 복사"><span>JOIN CODE</span><strong>${escapeHtml(team.code)}</strong>${icon('copy')}</button><button class="team-code-edit" data-action="edit-team-code" data-id="${team.id}">코드 변경</button></div>
       <p>발표와 순위에서 제외되며, 소속 인원은 모든 발표 팀을 평가할 수 있습니다.</p>
       <div class="material-count">가입 인원 <strong>${team.memberCount}</strong>명</div>
       <button class="danger-btn" data-action="delete-team" data-id="${team.id}">평가단 삭제</button>
@@ -315,7 +329,7 @@ function operatorTeamCard(team) {
   return `<article class="team-card ${team.isActive ? 'active-team' : ''}" style="--team-color:${team.color}">
     <div class="team-meta"><span class="team-number">TEAM / ${String(team.order).padStart(2, '0')}</span><span class="mini-state ${team.isActive || team.published ? 'done' : ''}">${team.isActive ? '현재 투표 팀' : team.published ? '공개됨' : '준비 중'}</span></div>
     <h3>${escapeHtml(team.name)}</h3>
-    <button class="team-code" data-action="copy-team-code" data-id="${team.id}" title="참가 코드 복사"><span>JOIN CODE</span><strong>${escapeHtml(team.code)}</strong>${icon('copy')}</button>
+    <div class="team-code-tools"><button class="team-code" data-action="copy-team-code" data-id="${team.id}" title="참가 코드 복사"><span>JOIN CODE</span><strong>${escapeHtml(team.code)}</strong>${icon('copy')}</button><button class="team-code-edit" data-action="edit-team-code" data-id="${team.id}">코드 변경</button></div>
     ${team.presentation ? `<div class="project-name">${escapeHtml(team.presentation.title)}</div><p>${escapeHtml(team.presentation.summary)}</p>` : '<p>프로젝트 이름과 소개를 등록하면 참가자 대시보드에 즉시 공개됩니다.</p>'}
     <div class="material-count">발표자료 <strong>${team.materials.length}</strong> / 5</div>
     <div class="team-actions">
@@ -393,6 +407,7 @@ function openModal(type, teamId) {
   if (type === 'materials') root.innerHTML = materialsModal(team);
   if (type === 'result') root.innerHTML = resultModal(team);
   if (type === 'detail') root.innerHTML = detailModal(team);
+  if (type === 'team-code') root.innerHTML = teamCodeModal(team);
   document.body.style.overflow = 'hidden';
 }
 
@@ -417,6 +432,16 @@ function teamModal() {
       <label class="option-toggle"><input type="checkbox" name="evaluatorOnly"><span><strong>평가단으로 참여</strong><small>선생님·대학생처럼 발표 없이 심사에만 참여하며 발표 순서와 순위에서 제외됩니다.</small></span></label>
       <div class="form-error" id="modal-error"></div>
       <div class="modal-actions"><button type="button" class="secondary-btn" data-action="close-modal">취소</button><button type="submit" class="primary-btn lime">팀 추가 ${icon('arrow')}</button></div>
+    </form>`);
+}
+
+function teamCodeModal(team) {
+  return modalShell(`${team.name} / join code`, '참가 코드 변경', `
+    <div class="project-brief"><strong>현재 코드 · ${escapeHtml(team.code)}</strong>코드를 바꾸면 기존 참가자의 계정과 데이터는 그대로 유지됩니다. 앞으로 가입하는 참가자에게는 새 코드를 전달해 주세요.</div>
+    <form id="team-code-form" data-team-id="${team.id}">
+      <div class="field"><label for="managed-team-code">새 참가 코드</label><input id="managed-team-code" name="code" minlength="4" maxlength="20" pattern="[A-Za-z0-9-]+" value="${escapeHtml(team.code)}" autocomplete="off" required><span class="field-hint">영문 대문자, 숫자, 하이픈으로 4~20자 · 입력한 영문은 자동으로 대문자로 저장됩니다.</span></div>
+      <div class="form-error" id="modal-error"></div>
+      <div class="modal-actions"><button type="button" class="secondary-btn" data-action="close-modal">취소</button><button type="submit" class="primary-btn">코드 변경 ${icon('arrow')}</button></div>
     </form>`);
 }
 
@@ -633,6 +658,25 @@ async function handleTeamSubmit(form) {
   }
 }
 
+async function handleTeamCodeSubmit(form) {
+  const button = form.querySelector('[type="submit"]');
+  const errorElement = form.querySelector('.form-error');
+  const values = Object.fromEntries(new FormData(form));
+  setButtonLoading(button, true, '변경 중');
+  try {
+    const result = await api(`/api/teams/${form.dataset.teamId}/code`, {
+      method: 'PATCH',
+      body: JSON.stringify({ code: values.code })
+    });
+    closeModal();
+    toast(result.message);
+    await loadDashboard();
+  } catch (error) {
+    errorElement.textContent = error.message;
+    setButtonLoading(button, false);
+  }
+}
+
 async function handleUserSubmit(form) {
   const button = form.querySelector('[type="submit"]');
   const errorElement = form.querySelector('.form-error');
@@ -770,6 +814,7 @@ document.addEventListener('click', async (event) => {
   }
   if (action === 'account') openModal('account');
   if (action === 'add-team') openModal('add-team');
+  if (action === 'edit-team-code') openModal('team-code', target.dataset.id);
   if (action === 'manage-users') {
     target.disabled = true;
     try {
@@ -965,6 +1010,7 @@ document.addEventListener('submit', (event) => {
   if (event.target.id === 'vote-form') handleModalSubmit(event.target, 'vote');
   if (event.target.id === 'publish-form') handleModalSubmit(event.target, 'publish');
   if (event.target.id === 'team-form') handleTeamSubmit(event.target);
+  if (event.target.id === 'team-code-form') handleTeamCodeSubmit(event.target);
   if (event.target.id === 'user-form') handleUserSubmit(event.target);
   if (event.target.id === 'password-form') handlePasswordSubmit(event.target);
   if (event.target.id === 'material-form') handleMaterialSubmit(event.target);

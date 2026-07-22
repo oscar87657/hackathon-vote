@@ -236,6 +236,38 @@ test('운영자 팀 추가와 발표자료 업로드·다운로드', async () =>
   assert.equal(ownUnpublishedTeam.isOwnTeam, true);
   assert.equal(ownUnpublishedTeam.materials[0].originalName, 'rocket-demo.pdf');
 
+  result = await request(`/api/teams/${teamId}/code`, {
+    method: 'PATCH',
+    body: JSON.stringify({ code: 'NO-AUTH' })
+  }, rocketCookie);
+  assert.equal(result.response.status, 403);
+  result = await request(`/api/teams/${teamId}/code`, {
+    method: 'PATCH',
+    body: JSON.stringify({ code: 'NOVA26' })
+  }, operatorCookie);
+  assert.equal(result.response.status, 409);
+  result = await request(`/api/teams/${teamId}/code`, {
+    method: 'PATCH',
+    body: JSON.stringify({ code: 'bad code!' })
+  }, operatorCookie);
+  assert.equal(result.response.status, 400);
+  result = await request(`/api/teams/${teamId}/code`, {
+    method: 'PATCH',
+    body: JSON.stringify({ code: 'rocket-new' })
+  }, operatorCookie);
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.team.code, 'ROCKET-NEW');
+  result = await request('/api/register', {
+    method: 'POST',
+    body: JSON.stringify({ name: '구코드', email: 'old-code@example.com', password: 'password123', teamCode: 'ROCKET26' })
+  });
+  assert.equal(result.response.status, 400);
+  result = await request('/api/register', {
+    method: 'POST',
+    body: JSON.stringify({ name: '신코드', email: 'new-code@example.com', password: 'password123', teamCode: 'ROCKET-NEW' })
+  });
+  assert.equal(result.response.status, 201);
+
   result = await request(`/api/teams/${teamId}/presentation`, {
     method: 'POST',
     body: JSON.stringify({ title: '권한 없음', summary: '다른 팀 소속은 이 발표를 수정할 수 없습니다.' })
