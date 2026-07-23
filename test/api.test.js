@@ -136,7 +136,7 @@ test('발표 공개 → 익명 참가자 투표 → 마감 흐름', async () => 
   const pixelTeam = result.body.teams.find((team) => team.id === 'team_pixel');
   assert.equal(pixelTeam.participantReviews.length, 1);
   assert.match(pixelTeam.participantReviews[0].anonymousLabel, /^익명 [A-F0-9]{6}$/);
-  assert.deepEqual(Object.keys(pixelTeam.participantReviews[0]).sort(), ['anonymousLabel', 'comment', 'scores']);
+  assert.deepEqual(Object.keys(pixelTeam.participantReviews[0]).sort(), ['anonymousLabel', 'comment', 'id', 'scores']);
   assert.equal(Object.hasOwn(pixelTeam.participantReviews[0], 'participantName'), false);
   assert.equal(Object.hasOwn(pixelTeam.participantReviews[0], 'participantTeamName'), false);
   assert.equal(pixelTeam.participantReviews[0].comment, '응원합니다.');
@@ -446,6 +446,35 @@ test('같은 브라우저 쿠키에서도 탭별 토큰으로 관리자와 참�
   }, participantLogin.cookie);
   assert.equal(result.body.user.role, 'participant');
   assert.equal(result.body.user.name, '평가선생님');
+});
+
+test('관리자가 작성자 신원 없이 개별 익명 평가를 삭제한다', async () => {
+  const operatorCookie = await login('admin@hackathon.kr', 'admin1234');
+  const participantCookie = await login('pixel@hackathon.kr', 'vote1234');
+  let result = await request('/api/teams/team_green/vote', {
+    method: 'POST',
+    body: JSON.stringify({ scores: validScores, comment: '삭제 기능을 확인하기 위한 익명 평가입니다.' })
+  }, participantCookie);
+  assert.equal(result.response.status, 200);
+
+  result = await request('/api/dashboard', {}, operatorCookie);
+  const greenTeam = result.body.teams.find((team) => team.id === 'team_green');
+  assert.equal(greenTeam.participantReviews.length, 1);
+  const review = greenTeam.participantReviews[0];
+  assert.match(review.anonymousLabel, /^익명 [A-F0-9]{6}$/);
+  assert.equal(Object.hasOwn(review, 'userId'), false);
+
+  result = await request(`/api/votes/${review.id}`, { method: 'DELETE' }, participantCookie);
+  assert.equal(result.response.status, 403);
+  result = await request(`/api/votes/${review.id}`, { method: 'DELETE' }, operatorCookie);
+  assert.equal(result.response.status, 200);
+  assert.match(result.body.message, /^익명 [A-F0-9]{6} 평가를 삭제했습니다\.$/);
+
+  result = await request('/api/dashboard', {}, operatorCookie);
+  const updatedGreenTeam = result.body.teams.find((team) => team.id === 'team_green');
+  assert.equal(updatedGreenTeam.participantVoteCount, 0);
+  assert.equal(updatedGreenTeam.participantReviews.length, 0);
+  assert.equal(updatedGreenTeam.results.combined, 0);
 });
 
 test('팀별·전체 참가자 투표 초기화와 권한 검사', async () => {

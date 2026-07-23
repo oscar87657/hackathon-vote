@@ -560,7 +560,7 @@ function resultModal(team) {
   const participant = team.results.participant;
   const detail = scoreMeta.map(([key, label]) => `<div><span>${label}</span><strong>${participant[key].toFixed(1)}</strong></div>`).join('');
   const participantReviews = team.participantReviews?.length
-    ? team.participantReviews.map(individualReview).join('')
+    ? team.participantReviews.map((review) => individualReview(review, team.id)).join('')
     : '<div class="empty-state compact"><strong>아직 참가자 심사가 없습니다.</strong>참가자가 투표하면 익명 점수와 의견이 표시됩니다.</div>';
   return modalShell(`${team.name} / live result`, '평가 결과', `
     <div class="result-box"><div class="result-total">${team.results.combined.toFixed(2)}</div><div class="result-lines">${detail}<div><span>참여</span><strong>익명 평가 ${team.participantVoteCount}건</strong></div></div></div>
@@ -568,12 +568,13 @@ function resultModal(team) {
     <div class="individual-review-list">${participantReviews}</div>`);
 }
 
-function individualReview(review) {
+function individualReview(review, teamId) {
   const scoreDetail = scoreMeta.map(([key, label]) => `<li><span>${escapeHtml(label.replace(/^Q\d+\.\s*/, ''))}</span><strong>${Number(review.scores[key] || 0)}점</strong></li>`).join('');
   return `<article class="individual-review">
     <header><div><strong>${escapeHtml(review.anonymousLabel)}</strong><span>작성자 정보 완전 비공개</span></div><b>${average(review.scores).toFixed(1)}</b></header>
     <p>${escapeHtml(review.comment || '작성된 한 줄 평가가 없습니다.')}</p>
     <details><summary>항목별 점수 보기</summary><ul>${scoreDetail}</ul></details>
+    <div class="individual-review-actions"><button class="danger-text" type="button" data-action="delete-review" data-id="${review.id}" data-team-id="${teamId}" data-label="${escapeHtml(review.anonymousLabel)}">이 평가 삭제</button></div>
   </article>`;
 }
 
@@ -902,6 +903,21 @@ document.addEventListener('click', async (event) => {
       toast(result.message);
       await loadDashboard();
       openModal('materials', teamId);
+    } catch (error) {
+      target.disabled = false;
+      toast(error.message, 'error');
+    }
+  }
+  if (action === 'delete-review') {
+    const team = state.dashboard.teams.find((item) => item.id === target.dataset.teamId);
+    const anonymousLabel = target.dataset.label || '이 익명 평가';
+    if (!team || !window.confirm(`${anonymousLabel}를 삭제할까요?\n\n점수와 코멘트가 함께 삭제되며 복구할 수 없습니다.`)) return;
+    target.disabled = true;
+    try {
+      const result = await api(`/api/votes/${target.dataset.id}`, { method: 'DELETE' });
+      toast(result.message);
+      await loadDashboard();
+      openModal('result', team.id);
     } catch (error) {
       target.disabled = false;
       toast(error.message, 'error');

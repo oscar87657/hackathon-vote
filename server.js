@@ -532,6 +532,7 @@ function teamPayload(team, user, includeResults = false) {
     };
     payload.participantReviews = votes.map((vote) => {
       return {
+        id: vote.id,
         anonymousLabel: `익명 ${crypto.createHash('sha256').update(vote.id).digest('hex').slice(0, 6).toUpperCase()}`,
         scores: vote.scores,
         comment: vote.comment
@@ -1021,6 +1022,18 @@ async function handleApi(req, res, pathname) {
       removedReviewCount,
       message: `${team.name}의 점수와 코멘트 ${removedVoteCount + removedReviewCount}건을 모두 초기화했습니다.`
     });
+  }
+
+  const individualVoteDeleteMatch = pathname.match(/^\/api\/votes\/([^/]+)$/);
+  if (req.method === 'DELETE' && individualVoteDeleteMatch) {
+    const user = requireUser(req, res, 'operator');
+    if (!user) return;
+    const index = db.votes.findIndex((vote) => vote.id === individualVoteDeleteMatch[1]);
+    if (index < 0) return error(res, 404, '삭제할 평가를 찾을 수 없습니다.');
+    const [vote] = db.votes.splice(index, 1);
+    const anonymousLabel = `익명 ${crypto.createHash('sha256').update(vote.id).digest('hex').slice(0, 6).toUpperCase()}`;
+    await saveDatabase();
+    return json(res, 200, { message: `${anonymousLabel} 평가를 삭제했습니다.` });
   }
 
   if (req.method === 'DELETE' && pathname === '/api/votes') {
